@@ -1,0 +1,39 @@
+# Python virtual environment
+.venv/
+
+# Bytecode + cache
+__pycache__/
+*.py[cod]
+*.pyo
+
+# Test cache
+.pytest_cache/
+coverage/
+htmlcov/
+
+# Logs
+*.log
+
+# Environment variables
+.env
+
+# Node.js / Vite / React
+node_modules/
+dist/
+build/
+*.tsbuildinfo
+*.log
+
+# Vite build artifacts
+frontend/dist/
+frontend/.vite/
+frontend/coverage/
+
+# Editor / OS files
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+
+# Windows file metadata (from browser downloads)
+*.csv:Zone.Identifier
