@@ -16,6 +16,7 @@ Coverage:
 from __future__ import annotations
 
 import asyncio
+import threading
 from datetime import date
 from decimal import Decimal
 from unittest.mock import patch
@@ -132,13 +133,24 @@ def test_fetch_price_sync_yfinance_exception_returns_none():
 
 @pytest.mark.asyncio
 async def test_get_price_timeout_returns_none():
-    async def _slow_thread(*_args, **_kwargs):
-        await asyncio.sleep(9999)
+    # The worker thread must outlive the wait_for timeout to trigger
+    # TimeoutError, but it must NOT block forever: asyncio.to_thread runs it on
+    # the default ThreadPoolExecutor, whose atexit hook joins every worker
+    # thread at interpreter shutdown. A bare time.sleep(9999) would therefore
+    # hang the pytest process after all tests pass. Use a releasable Event so
+    # the thread can finish in teardown.
+    release = threading.Event()
 
-    with patch("app.services.price.asyncio.wait_for", side_effect=asyncio.TimeoutError):
-        result = await get_price("AAPL", date(2024, 2, 1))
+    def _block(*_a, **_k):
+        release.wait(timeout=30)
 
-    assert result is None
+    try:
+        with patch("app.services.price._fetch_price_sync", side_effect=_block), \
+             patch("app.services.price.PRICE_FETCH_TIMEOUT_SECONDS", 0.01):
+            result = await get_price("AAPL", date(2024, 2, 1))
+        assert result is None
+    finally:
+        release.set()
 
 
 @pytest.mark.asyncio

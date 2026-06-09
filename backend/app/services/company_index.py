@@ -7,8 +7,9 @@ Design
 Source:  https://www.sec.gov/files/company_tickers.json  
 Format:  { "0": { "cik_str": 320193, "ticker": "AAPL", "title": "Apple Inc." }, ... }
 
-The dataset (~10 k entries) is loaded once at startup into an in-memory list.
-A background refresh runs at most once every 24 hours without blocking requests.
+The dataset (~10 k entries) is loaded once at startup into an in-memory list. It is refreshed
+lazily on the /api/search path: a search arriving >24h after the last load triggers a rebuild
+before returning (CompanyIndex.maybe_refresh). There is no background task.
 
 All search queries operate exclusively on in-memory data.
 Zero external network calls are made during search, ensuring deterministic latency.
@@ -74,7 +75,7 @@ class _IndexEntry:
 class CompanyIndex:
     """
     Thread-safe (single-writer) in-memory company index.
-    Loaded at application startup, refreshed in the background every 24 hours.
+    Loaded at application startup, refreshed lazily on search requests.
     """
 
     def __init__(self) -> None:
@@ -90,7 +91,8 @@ class CompanyIndex:
         """
         Fetch and build the index from SEC.
 
-        Called once at startup (lifespan). Also called by the background refresher.
+        Called once at startup (lifespan). The lazy refresh path uses
+        _fetch_and_build directly, not this method.
         Raises on network failure, startup caller should handle this gracefully.
         """
         async with self._lock:

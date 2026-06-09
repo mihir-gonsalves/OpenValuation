@@ -64,7 +64,7 @@ Fetches the full XBRL fact history from:
 data.sec.gov/api/xbrl/companyfacts/CIK{CIK_10}.json
 ```
 
-The 16 most recent quarterly filing periods (10-Q and 10-K) are selected from this response.
+The 12 most recent quarterly filing periods (10-Q and 10-K) are selected from this response.
 
 ### 3. Price Data
 
@@ -142,7 +142,7 @@ If FCF is negative or required tags are missing, P/FCF is shown as `N/A` with an
 
 While derived from quarterly filings, TTM periods reflect annualized performance rather than single-quarter results.
 
-Twelve TTM periods are constructed from the 16 most recent quarterly filings, stepping back one quarter at a time. Each TTM period represents a rolling 12-month window anchored to a specific quarter end date, columns are labelled `TTM [quarter end date]`.
+Twelve TTM periods are constructed from the 12 most recent quarterly filings, stepping back one quarter at a time. Each TTM period represents a rolling 12-month window anchored to a specific quarter end date, columns are labelled `TTM [quarter end date]`.
 
 - Income statement and cash flow items are TTM-annualized
 - Balance sheet items are point-in-time as of the period end date
@@ -295,10 +295,13 @@ OpenValuation/
 │   │   │   └── export.py            GET  /api/export/{cik_10}
 │   │   ├── services/
 │   │   │   ├── company_index.py     In-memory company index + /api/search lookup
-│   │   │   ├── edgar.py             EDGAR HTTP client + XBRL extraction + TTM logic
+│   │   │   ├── edgar.py             EDGAR HTTP client + data fetching
 │   │   │   ├── price.py             yfinance wrapper
 │   │   │   ├── multiples.py         Pure calculation functions
-│   │   │   └── workbook.py          openpyxl Excel builder
+│   │   │   ├── workbook.py          openpyxl Excel builder
+│   │   │   ├── xbrl.py              XBRL extraction
+│   │   │   ├── xbrl_maps.py         XBRL data transformation
+│   │   │   └── xbrl_warnings.py     XBRL warning helpers
 │   │   ├── models/
 │   │   │   ├── company.py           Pydantic models: CompanyResult, FilingPeriod
 │   │   │   ├── errors.py            Pydantic models: Errors, Warnings
@@ -372,7 +375,7 @@ All tags are from the `us-gaap` taxonomy. Tags are listed in fallback order. The
 | Concept | Primary Tag | Fallback Tag(s) |
 |---|---|---|
 | Shares Outstanding | `CommonStockSharesOutstanding` | — |
-| Revenue | `RevenueFromContractWithCustomerExcludingAssessedTax` | `Revenues`, `SalesRevenueNet` |
+| Revenue | `RevenueFromContractWithCustomerExcludingAssessedTax` | `Revenues`, `SalesRevenueNet`, `RevenueFromContractWithCustomerIncludingAssessedTax` |
 | Net Income | `NetIncomeLoss` | — |
 | EBIT | `OperatingIncomeLoss` | — |
 | D&A | `DepreciationDepletionAndAmortization` | `DepreciationAndAmortization` |

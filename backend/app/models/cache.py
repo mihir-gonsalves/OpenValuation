@@ -3,7 +3,7 @@
 Cache models and TTL logic for the in-memory EDGAR payload cache.
 
 Design:
-  - Cache stores raw EDGAR payloads (companyfacts + metadata), not computed results.
+  - Cache stores raw EDGAR payloads (companyfacts + parsed metadata), not computed results.
   - The expensive operation is the EDGAR fetch (5-10 MB companyfacts blob).
   - Computation (XBRL extraction, TTM bridge, multiples) is fast and runs on every
     request from the cached payload. This ensures Phase 2 and Phase 3 logic is always
@@ -49,16 +49,10 @@ class EDGARPayload(BaseModel):
     Typically 5-10 MB. Contains the complete XBRL fact history for the company.
     """
 
-    metadata: dict[str, Any]
-    """
-    Full response from data.sec.gov/submissions/CIK{CIK_10}.json.  
-    Used to build CompanyMeta (name, ticker, SIC, exchange).
-    """
-
     company_meta: CompanyMeta
     """
-    Parsed company metadata derived from `metadata` at fetch time.  
-    Stored here so we can cheaply return it on cache hits without re-parsing.
+    Parsed company metadata derived from data.sec.gov/submissions/CIK{CIK_10}.json 
+    at fetch time. Stored here so we can cheaply return it on cache hits without re-parsing.
     """
 
 

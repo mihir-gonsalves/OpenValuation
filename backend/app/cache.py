@@ -2,8 +2,7 @@
 """
 In-memory cache store for EDGAR payloads.
 
-Design
-------
+Design:
 - Module-level dict: simple, zero-dependency, zero-cost.
 - Keyed by CIK_10 (10-digit zero-padded string). CIK is EDGAR's stable internal
   identifier. Tickers can change, CIK never does.
@@ -27,6 +26,13 @@ logger = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 # Internal store
 # ---------------------------------------------------------------------------
+
+MAX_CACHE_ENTRIES = 32
+"""
+Upper bound on cache size. At ~5-10 MB per EDGAR companyfacts payload this
+caps in-memory use at roughly 160-320 MB, leaving headroom under Render
+free tier's 512 MB ceiling. Eviction is oldest-first by cached_at, not LRU.
+"""
 
 _store: dict[str, CacheEntry] = {}
 
@@ -55,16 +61,27 @@ def get(cik_10: str) -> CacheEntry | None:
 def put(
     cik_10: str,
     companyfacts: dict[str, Any],
-    metadata: dict[str, Any],
     company_meta: CompanyMeta,
 ) -> CacheEntry:
     """
     Store a new cache entry for `cik_10`.  
     Any existing entry (including non-expired ones) is overwritten.
+    When the cache is at MAX_CACHE_ENTRIES, the oldest entry is evicted first.
     """
+    # Evict the oldest entry to make room, but only if this is a new key
+    # (overwriting an existing key doesn't grow the cache).
+    if cik_10 not in _store and len(_store) >= MAX_CACHE_ENTRIES:
+        oldest_key = min(_store, key=lambda k: _store[k].cached_at)
+        logger.info(
+            "Cache at capacity (%d entries) - evicting CIK %s to make room for %s.",
+            MAX_CACHE_ENTRIES,
+            oldest_key,
+            cik_10,
+        )
+        del _store[oldest_key]
+
     payload = EDGARPayload(
         companyfacts=companyfacts,
-        metadata=metadata,
         company_meta=company_meta,
     )
     entry = CacheEntry(payload=payload)
@@ -73,6 +90,7 @@ def put(
     return entry
 
 
+# Currently unused, kept for API completeness.
 def invalidate(cik_10: str) -> None:
     """Evict the cache entry for `cik_10` if it exists."""
     removed = _store.pop(cik_10, None)

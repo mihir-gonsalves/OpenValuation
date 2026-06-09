@@ -20,7 +20,6 @@ Phase 3: replace each stub with the full calculation logic.
 from __future__ import annotations
 
 from decimal import Decimal
-from typing import Optional
 
 from app.models.errors import Warning
 from app.models.financials import ExtractedFinancials, EVComponents, MultipleSet
@@ -62,18 +61,18 @@ def compute_all(financials: ExtractedFinancials) -> tuple[MultipleSet, EVCompone
 # ---------------------------------------------------------------------------
 
 
-def compute_enterprise_value(f: ExtractedFinancials) -> tuple[Optional[Decimal], EVComponents, list[Warning]]:
+def compute_enterprise_value(f: ExtractedFinancials) -> tuple[Decimal | None, EVComponents, list[Warning]]:
     """
     Compute enterprise value and return itemised components.
 
     EV  = Market Cap
-       \+ Long-Term Debt (non-current)
-       \+ Short-Term Borrowings
-       \+ Current Portion of LT Debt
-       \+ Finance Lease Liabilities (Current + Non-Current)
-       \+ Minority Interest
-       \+ Preferred Stock
-       \- Cash & Cash Equivalents
+       + Long-Term Debt (non-current)
+       + Short-Term Borrowings
+       + Current Portion of LT Debt
+       + Finance Lease Liabilities (Current + Non-Current)
+       + Minority Interest
+       + Preferred Stock
+       - Cash & Cash Equivalents
 
     Missing components are treated as zero with no warning (absence often reflects
     true zero balances).  
@@ -91,10 +90,10 @@ def compute_enterprise_value(f: ExtractedFinancials) -> tuple[Optional[Decimal],
 
 
 def compute_pe(
-    price: Optional[Decimal],
-    eps_diluted: Optional[Decimal],
-    eps_basic: Optional[Decimal] = None,
-) -> tuple[Optional[Decimal], str, list[Warning]]:
+    price: Decimal | None,
+    eps_diluted: Decimal | None,
+    eps_basic: Decimal | None = None,
+) -> tuple[Decimal | None, str, list[Warning]]:
     """
     P/E = Price ÷ Diluted EPS (TTM).
     
@@ -107,10 +106,10 @@ def compute_pe(
 
 
 def compute_ev_ebitda(
-    ev: Optional[Decimal],
-    operating_income: Optional[Decimal],
-    da: Optional[Decimal],
-) -> tuple[Optional[Decimal], list[Warning]]:
+    ev: Decimal | None,
+    operating_income: Decimal | None,
+    da: Decimal | None,
+) -> tuple[Decimal | None, list[Warning]]:
     """
     EV/EBITDA = EV ÷ (Operating Income + D&A).
     
@@ -120,9 +119,9 @@ def compute_ev_ebitda(
 
 
 def compute_ev_ebit(
-    ev: Optional[Decimal],
-    operating_income: Optional[Decimal],
-) -> tuple[Optional[Decimal], list[Warning]]:
+    ev: Decimal | None,
+    operating_income: Decimal | None,
+) -> tuple[Decimal | None, list[Warning]]:
     """
     EV/EBIT = EV ÷ Operating Income.
     
@@ -134,9 +133,9 @@ def compute_ev_ebit(
 
 
 def compute_ev_revenue(
-    ev: Optional[Decimal],
-    revenue: Optional[Decimal],
-) -> tuple[Optional[Decimal], list[Warning]]:
+    ev: Decimal | None,
+    revenue: Decimal | None,
+) -> tuple[Decimal | None, list[Warning]]:
     """
     EV/Revenue = EV ÷ Revenue.
     
@@ -146,9 +145,9 @@ def compute_ev_revenue(
 
 
 def compute_ps(
-    market_cap: Optional[Decimal],
-    revenue: Optional[Decimal],
-) -> tuple[Optional[Decimal], list[Warning]]:
+    market_cap: Decimal | None,
+    revenue: Decimal | None,
+) -> tuple[Decimal | None, list[Warning]]:
     """
     P/S = Market Cap ÷ Revenue.
     
@@ -158,9 +157,9 @@ def compute_ps(
 
 
 def compute_pb(
-    market_cap: Optional[Decimal],
-    stockholders_equity: Optional[Decimal],
-) -> tuple[Optional[Decimal], list[Warning]]:
+    market_cap: Decimal | None,
+    stockholders_equity: Decimal | None,
+) -> tuple[Decimal | None, list[Warning]]:
     """
     P/B = Market Cap ÷ Stockholders' Equity.
     
@@ -172,10 +171,10 @@ def compute_pb(
 
 
 def compute_pfcf(
-    market_cap: Optional[Decimal],
-    operating_cash_flow: Optional[Decimal],
-    capex: Optional[Decimal],
-) -> tuple[Optional[Decimal], list[Warning]]:
+    market_cap: Decimal | None,
+    operating_cash_flow: Decimal | None,
+    capex: Decimal | None,
+) -> tuple[Decimal | None, list[Warning]]:
     """
     P/FCF = Market Cap ÷ (Operating Cash Flow - CapEx).
     

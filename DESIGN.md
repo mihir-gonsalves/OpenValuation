@@ -60,7 +60,7 @@ https://www.sec.gov/files/company_tickers.json
 ### Design
 
 - The company index is loaded from the SEC `company_tickers.json` dataset at application startup and stored in memory
-- To keep the dataset reasonably up to date, a background refresh is triggered at most once every 24 hours. This refresh does not block incoming requests
+- The index is refreshed lazily on the search path at most once every 24 hours (`CompanyIndex.maybe_refresh`), there is no background task
 - All search queries operate exclusively on the in-memory dataset. No external network calls are made during search, ensuring deterministic latency
 
 ### Search Algorithm
@@ -269,6 +269,8 @@ Rationale:
 
 A structured warning `amendment_exists` is attached to the affected period to indicate that an amended version is available but was not used.
 
+Tradeoff: reproducibility and consistency are prioritized over post-hoc accuracy.
+
 ### Unit Validation
 
 Only facts with `unitRef: USD` are accepted. Non-USD facts are rejected at extraction.  
@@ -396,7 +398,7 @@ No reconstruction is attempted beyond the defined tag set. This can understate E
 
 ### Structure
 
-Twelve TTM periods derived from 16 quarterly filings, stepping back one quarter at a time. Period 1 is the most recent quarter, Period 12 is 11 quarters prior.  
+Twelve TTM periods derived from 12 quarterly filings, stepping back one quarter at a time. Period 1 is the most recent quarter, Period 12 is 11 quarters prior.  
 Each column is labeled `TTM [quarter end date]`. The filing date is shown separately so the price fetch date is verifiable.
 
 12 periods provides enough history to see trend direction without requiring excessive historical EDGAR data.
@@ -460,7 +462,7 @@ Makes the data source traceable without requiring the user to inspect raw filing
 | All debt tags absent | EV computed with debt=0, `ev_debt_missing` warning applied |
 | Non-USD unit | Fact rejected at extraction |
 | Ambiguous fact (multiple contexts) | Deterministic rule applied, if ambiguous `None` + `ambiguous_fact` applied |
-| Period mismatch (>3 days) | Fact rejected, `period_mismatch` warning applied |
+| Period mismatch | Fact rejected, `period_mismatch` warning unused (kept for completeness) - validated with exact-key matching |
 | EDGAR 429 | Retry once with exponential backoff, `503` to client if it fails |
 | EDGAR timeout (>15s) | `503` with user-readable message |
 
@@ -474,7 +476,7 @@ Real `companyfacts.json` responses (Apple, Microsoft, Cricut, Delta Air Lines, T
 
 Extraction functions accept the parsed JSON dict directly, there is no HTTP mocking needed for extraction tests. This validates behavior against real API responses, not just that the correct URL was called.
 
-Coverage includes: tag fallback behavior, finance lease handling, CapEx sign normalization, missing tag handling, non-USD rejection, period mismatch rejection.
+Coverage includes: tag fallback behavior, finance lease handling, CapEx sign normalization, missing tag handling, non-USD rejection.
 
 ### TTM Tests
 
@@ -539,4 +541,5 @@ A "Copy Link" button copies the current URL to the clipboard via `navigator.clip
 | Cache | In-process memory | Lost on restart, no horizontal scale |
 | Price data | `yfinance` | Unofficial, can fail intermittently |
 | Figures | GAAP only | No adjusted EBITDA or non-GAAP metrics |
+| /A Filings | Originals preferred | Post-hoc accuracy may suffer |
 | Scope | U.S. SEC filers | No IFRS / foreign private issuer support |

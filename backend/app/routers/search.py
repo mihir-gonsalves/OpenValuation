@@ -40,9 +40,11 @@ async def search(body: SearchRequest, request: Request) -> SearchResponse:
     Search the in-memory company index for companies matching `body.query`.
 
     The index is loaded from SEC company_tickers.json at startup and refreshed
-    in the background every 24 hours.
+    lazily: if the index is older than 24 hours when a search request arrives,
+    it is refreshed before results are returned.
     """
     company_index = request.app.state.company_index
+    await company_index.maybe_refresh()
     results = company_index.search(body.query)
 
     logger.info(

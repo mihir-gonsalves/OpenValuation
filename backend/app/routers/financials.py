@@ -4,8 +4,7 @@ GET /api/financials/{cik_10}
 
 Fetches EDGAR XBRL data and computed valuation multiples for a company.
 
-Flow
-----
+Flow:
 1. Validate CIK_10 format (422 on failure).
 2. Check in-memory cache for {cik_10} (hit -> skip steps 3-4).
 3. Fetch company metadata and XBRL companyfacts from EDGAR in parallel,
@@ -15,14 +14,12 @@ Flow
 6. Compute multiples (Phase 3: app/services/multiples.py).
 7. Return FinancialsResponse.
 
-Steps 5-6 degrade gracefully and independently:
-  - xbrl.py absent or ImportError -> empty periods, valid company metadata returned.
-  - xbrl.extract_ttm_periods raises NotImplementedError -> same as absent.
-  - multiples.py absent or NotImplementedError (Phase 2) -> periods contain extracted
-    data with empty MultipleSet/EVComponents rather than being silently dropped.
+Phase 2: _build_response is async, it awaits xbrl.extract_ttm_periods()
+         (which internally runs price fetches concurrently). 
+         TTMPeriods are returned with empty MultipleSet / EVComponents.
+         Phase 2 extraction data is never discarded.
 
-`_build_response` is a synchronous function dispatched via asyncio.to_thread so that
-CPU-bound XBRL extraction (Phase 2+) does not block the event loop.
+Phase 3: multiples.compute_all() raises not implemented error.
 """
 
 from __future__ import annotations
@@ -35,11 +32,18 @@ from fastapi import APIRouter, Path, Request
 import app.cache as cache_store
 from app.models.company import CompanyMeta
 from app.models.financials import EVComponents, FinancialsResponse, MultipleSet, TTMPeriod
-from app.services import edgar
+from app.services import edgar, xbrl
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter()
+
+# MultipleSet field names for collecting per-multiple warnings.
+# Listed explicitly: vars() includes Pydantic internal keys, model_dump()
+# returns plain dicts that lose the .warnings attribute.
+_MULTIPLE_FIELDS = (
+    "pe", "ev_ebitda", "ev_ebit", "ev_revenue", "ps", "pb", "pfcf",
+)
 
 
 @router.get(
@@ -72,11 +76,10 @@ async def get_financials(
     if cached_entry is not None:
         logger.info("Cache hit for CIK %s.", cik_10)
         payload = cached_entry.payload
-        return await asyncio.to_thread(
-            _build_response,
-            payload.company_meta,
-            payload.companyfacts,
-            cached_entry.cached_at,
+        return await _build_response(
+            company_meta=payload.company_meta,
+            companyfacts=payload.companyfacts,
+            cached_at=cached_entry.cached_at,
         )
 
     # -------------------------------------------------------------------------
@@ -84,6 +87,8 @@ async def get_financials(
     # -------------------------------------------------------------------------
     logger.info("Cache miss for CIK %s - fetching from EDGAR.", cik_10)
 
+    # Re-use the lifespan-managed client so TCP connections to data.sec.gov
+    # are pooled across requests rather than re-opened each time.
     http_client = request.app.state.edgar_client
     metadata, companyfacts = await asyncio.gather(
         edgar.fetch_metadata(cik_10, http_client),
@@ -91,19 +96,16 @@ async def get_financials(
     )
 
     company_meta = CompanyMeta.from_submissions(cik_10, metadata)
-
     entry = cache_store.put(
         cik_10=cik_10,
         companyfacts=companyfacts,
-        metadata=metadata,
         company_meta=company_meta,
     )
 
-    return await asyncio.to_thread(
-        _build_response,
-        company_meta,
-        companyfacts,
-        entry.cached_at,
+    return await _build_response(
+        company_meta=company_meta,
+        companyfacts=companyfacts,
+        cached_at=entry.cached_at,
     )
 
 
@@ -112,36 +114,41 @@ async def get_financials(
 # ---------------------------------------------------------------------------
 
 
-def _build_response(
+async def _build_response(
     company_meta: CompanyMeta,
     companyfacts: dict,
     cached_at: datetime,
 ) -> FinancialsResponse:
     """
-    Synchronous. Orchestrate XBRL extraction (Phase 2) and multiples (Phase 3).
+    Async. Orchestrate XBRL extraction (Phase 2) and multiples (Phase 3).
 
-    Called via asyncio.to_thread so CPU-bound extraction does not block the
-    event loop. Each phase is guarded independently:
+    _build_response is async because xbrl.extract_ttm_periods is async
+    (it runs concurrent price fetches via asyncio.gather internally).
+    It is awaited directly - not dispatched to a thread - because the
+    extraction work is I/O-bound (price fetches), not CPU-bound.
+
+    Each phase degrades gracefully and independently:
 
     Extraction (Phase 2)
-      - ImportError: xbrl.py not yet added -> empty periods.
-      - NotImplementedError: stub not yet replaced -> empty periods.
-      - Any other exception propagates as HTTP 500.
+      - Any exception -> logged, empty periods returned (avoids HTTP 500
+        for transient extraction bugs or malformed companyfacts payloads).
 
     Multiples (Phase 3)
       - ImportError or NotImplementedError on the first period -> all remaining
-        periods are built with empty MultipleSet/EVComponents rather than
-        being silently dropped. The flag short-circuits further attempts.
-      - Any other exception propagates as HTTP 500.
+        periods are built with empty MultipleSet / EVComponents. Extraction
+        data is never discarded or re-fetched.
+      - Any other exception per period -> logged, that period's multiples are
+        empty, extraction data is preserved.
     """
-
-    # --- Phase 2: XBRL extraction ---
+    # --- Phase 2: XBRL extraction + concurrent price fetches ---
     try:
-        from app.services import xbrl
-        extracted_periods = xbrl.extract_ttm_periods(companyfacts)
-    except (ImportError, NotImplementedError) as exc:
-        logger.debug("xbrl not available: %s", exc)
-        # Return an empty response stamped with the current computation time.
+        extracted_periods = await xbrl.extract_ttm_periods(
+            companyfacts,
+            ticker=company_meta.ticker,
+            is_capital_intensive=company_meta.is_capital_intensive,
+        )
+    except Exception:
+        logger.exception("XBRL extraction failed for CIK %s.", company_meta.cik_10)
         return FinancialsResponse(
             company=company_meta,
             periods=[],
@@ -152,10 +159,10 @@ def _build_response(
     # --- Phase 3: multiples computation ---
     multiples_ready = True
     try:
-        from app.services import multiples  # noqa: PLC0415 - stubs replaced in Phase 3
+        from app.services import multiples
     except ImportError:
-        logger.debug("multiples service not yet available.")
         multiples_ready = False
+        logger.debug("multiples service not yet available (Phase 3).")
 
     periods: list[TTMPeriod] = []
     for ef in extracted_periods:
@@ -170,15 +177,23 @@ def _build_response(
             try:
                 multiples_set, ev_components = multiples.compute_all(ef)
             except NotImplementedError:
-                logger.debug("multiples.compute_all not yet implemented.")
-                multiples_ready = False  # stop attempting for remaining periods
+                multiples_ready = False
+                logger.debug("multiples.compute_all not yet implemented (Phase 3).")
+            except Exception:
+                logger.exception(
+                    "multiples.compute_all error for CIK %s period %s.",
+                    company_meta.cik_10,
+                    ef.period_end,
+                )
 
-        # Collect all warnings from multiples computation
-        # - Period warnings aggregate extraction + multiples warnings
+        # Collect per-multiple warnings from Phase 3 (empty list in Phase 2).
+        # Iterate the seven known MultipleSet fields explicitly - using vars() or
+        # model_dump() on a Pydantic v2 model includes internal state keys and
+        # returns plain dicts respectively, both of which break .warnings access.
         multiples_warnings = [
             w
-            for mv in vars(multiples_set).values()
-            for w in mv.warnings
+            for field_name in _MULTIPLE_FIELDS
+            for w in getattr(multiples_set, field_name).warnings
         ]
 
         periods.append(
@@ -189,6 +204,9 @@ def _build_response(
                 multiples=multiples_set,
                 ev_components=ev_components,
                 extracted=ef,
+                # warnings = union of all extraction-layer warnings (XBRL extraction
+                # + price fetch, both attached inside extract_ttm_periods) and all
+                # per-multiple warnings from Phase 3.
                 warnings=ef.warnings + multiples_warnings,
             )
         )

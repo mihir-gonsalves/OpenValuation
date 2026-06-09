@@ -40,7 +40,10 @@ class WarningCode(str, Enum):
 
     # --- EV construction ---
     EV_DEBT_MISSING = "ev_debt_missing"
-    """All financial debt and finance lease tags absent. EV may be understated."""
+    """All financial debt and finance lease tags absent. EV may be understated.
+    
+    Set by Phase 3 (multiples.compute_all) when the union check finds every
+    debt/lease field None on ExtractedFinancials. Phase 2 does not raise this."""
 
     DEBT_DEDUPLICATED = "debt_deduplicated"
     """LongTermDebt approximated total debt, not added separately to avoid double-counting."""
@@ -70,13 +73,15 @@ class WarningCode(str, Enum):
     # --- TTM computation ---
     TTM_ANNUALIZED = "ttm_annualized"
     """Prior-year YTD unavailable (e.g., recent IPO or fiscal year change).
-    TTM approximated via annualisation: Annual + (YTD / quarters) × 4.
+    TTM approximated via annualization: Annual + (YTD / quarters) × 4.
     Result may be less precise than the standard bridge."""
 
     # --- Data integrity ---
     PERIOD_MISMATCH = "period_mismatch"
     """Income statement facts have misaligned period boundaries (>3 days).
-    Affected facts were rejected, relevant multiples may show N/A."""
+    Affected facts were rejected, relevant multiples may show N/A.
+    
+    Unused, currently not planned for use. Retained for API completeness."""
 
     AMBIGUOUS_FACT = "ambiguous_fact"
     """Multiple XBRL contexts match the same tag and period after deduplication
@@ -120,6 +125,10 @@ class ErrorCode(str, Enum):
     IFRS_FILER = "ifrs_filer"
     """Company files under IFRS taxonomy. Only US-GAAP XBRL is supported."""
 
+    UNSUPPORTED_TAXONOMY = "unsupported_taxonomy"
+    """companyfacts contains neither us-gaap nor ifrs-full facts
+    (e.g. a DEI-only early filer). Treated as unsupported."""
+
     INVALID_CIK = "invalid_cik"
     """CIK format is invalid. Expected a 10-digit zero-padded string."""
 
@@ -141,7 +150,7 @@ class Warning(BaseModel):
 
     code: WarningCode
     message: str
-    """Human-readable explanation suitable for display in the UI."""
+    """Human-understandable explanation suitable for display in the UI."""
 
     model_config = {"use_enum_values": True}
 
@@ -154,57 +163,21 @@ class APIError(BaseModel):
 
     error: ErrorCode
     message: str
-    """Human-readable message suitable for display in the UI."""
+    """Human-understandable message suitable for display in the UI."""
 
     model_config = {"use_enum_values": True}
 
 
 # ---------------------------------------------------------------------------
-# Pre-built warning instances (re-used across the codebase)
+# warn() convenience constructor
+# ---------------------------------------------------------------------------
+# Pre-built WARN_* constants are intentionally absent. Phase 2 constructs
+# warnings inline via warn(code, message) with dynamic per-period context
+# (tag name, fiscal year, etc.). Phase 3 may reintroduce constants for
+# period-static messages (e.g. NEGATIVE_BOOK_VALUE) once they are needed.
 # ---------------------------------------------------------------------------
 
 
 def warn(code: WarningCode, message: str) -> Warning:
     """Convenience constructor. Keeps call sites concise."""
     return Warning(code=code, message=message)
-
-
-WARN_EV_DEBT_MISSING = warn(
-    WarningCode.EV_DEBT_MISSING,
-    "All financial debt tags were absent. EV may be understated.",
-)
-
-WARN_FINANCE_LEASE_MISSING_CAPITAL_INTENSIVE = warn(
-    WarningCode.FINANCE_LEASE_MISSING_CAPITAL_INTENSIVE,
-    "Finance lease tags absent for a capital-intensive sector. EV may be understated.",
-)
-
-WARN_NEGATIVE_BOOK_VALUE = warn(
-    WarningCode.NEGATIVE_BOOK_VALUE,
-    "Stockholders' equity is negative. P/B is not analytically interpretable.",
-)
-
-WARN_FALLBACK_EPS_BASIC = warn(
-    WarningCode.FALLBACK_EPS_BASIC,
-    "Diluted EPS unavailable. Using basic EPS. P/E labeled 'P/E (basic)'.",
-)
-
-WARN_CASH_FALLBACK = warn(
-    WarningCode.CASH_FALLBACK_INCLUDES_INVESTMENTS,
-    "Cash fallback tag includes short-term investments. Cash deduction in EV may be overstated.",
-)
-
-WARN_AMENDMENT_EXISTS = warn(
-    WarningCode.AMENDMENT_EXISTS,
-    "An amended filing exists for this period but the original was used for consistency.",
-)
-
-WARN_TTM_ANNUALIZED = warn(
-    WarningCode.TTM_ANNUALIZED,
-    "Prior-year YTD unavailable. TTM approximated from annualised current YTD. Result may be less precise.",
-)
-
-WARN_LEASE_PRE_ASC842 = warn(
-    WarningCode.LEASE_PRE_ASC842,
-    "Pre-ASC 842 capital lease tags used. Lease accounting differs from post-adoption periods.",
-)

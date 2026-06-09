@@ -1,6 +1,6 @@
 # OpenValuation: Project Status
 
-**Last Updated:** 2026  
+**Last Updated:** 2026-06-09  
 **Current Phase:** Phase 2.
 
 ## Overview
@@ -74,7 +74,7 @@ Does not participate in search.
 
 ### TTM Presentation
 
-* 12 rolling TTM periods from the 16 most recent quarterly filings
+* 12 rolling TTM periods from the 12 most recent quarterly filings
 * Each period steps back one quarter
 * Labels follow the format: `TTM [quarter end date]`
 
@@ -176,8 +176,7 @@ Duplicate handling:
 
 Period validation:
 
-* Income statement facts must align within 3 days
-* Violations trigger `period_mismatch`
+* Uses exact-key matching, not `period_mismatch` warning
 
 Fallback logic:
 
@@ -211,7 +210,7 @@ Interpretation:
 
 ### Phase 1: Core Backend Infrastructure
 
-Status: Not started
+Status: Complete
 
 * FastAPI setup, CORS, and routing
 * EDGAR client with headers and timeout
@@ -224,7 +223,7 @@ Status: Not started
 
 ### Phase 2: XBRL Extraction and TTM Logic
 
-Status: Not started
+Status: In progress (near complete)
 
 Highest risk area.
 

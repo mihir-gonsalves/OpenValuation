@@ -1,24 +1,25 @@
 # backend/app/main.py
 """
-OpenValuation API - FastAPI application entry point.
+OpenValuation's FastAPI application entry point.
 
-Startup sequence
-----------------
-1. Load company index from SEC company_tickers.json into memory.  
-   - This is a required step. If it fails, the application starts anyway
-   but search will return empty results until the index refreshes.
+Lifespan (startup / shutdown)
+------------------------------
+1. Create the shared httpx.AsyncClient for EDGAR and attach to app.state.
+2. Load the in-memory company index once. Failure is non-fatal (search
+   returns empty results until a lazy refresh on the /api/search path succeeds).
+3. On shutdown: close the shared AsyncClient.
 
-2. Register CORS middleware (origins from ALLOWED_ORIGINS env var).
-
-3. Mount routers:
-   POST /api/search
-   GET  /api/financials/{cik_10}
-   GET  /api/export/{cik_10}
+Module scope (runs once at import time)
+----------------------------------------
+- Register CORS middleware.
+- Mount routers:
+    POST /api/search
+    GET  /api/financials/{cik_10}
+    GET  /api/export/{cik_10}
 """
 
 from __future__ import annotations
 
-import asyncio
 import logging
 from dotenv import load_dotenv
 import os
@@ -61,11 +62,16 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     Application lifespan handler.
 
     Startup:
-      - Initialise and load the in-memory company index.
-      - Attach the index to app.state so routers can access it.
+      - Create the shared httpx.AsyncClient for EDGAR (connection pooling) and
+        attach it to app.state.
+      - Load the in-memory company index once. Failure is non-fatal (search
+        returns empty results until a later lazy refresh succeeds).
 
     Shutdown:
-      - No cleanup required (in-memory state is discarded).
+      - Close the shared httpx.AsyncClient. No other cleanup is required.
+
+    Note: the company index is refreshed lazily on the /api/search path
+    (CompanyIndex.maybe_refresh), not by a background task here.
     """
     # --- Startup ---
     logger.info("Starting OpenValuation API.")
@@ -91,30 +97,11 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
 
     app.state.company_index = company_index
 
-    async def _refresh_loop() -> None:
-        """Check every hour whether the index is stale, refresh if so."""
-        while True:
-            try:
-                await asyncio.sleep(3600)
-                await company_index.maybe_refresh()
-            except asyncio.CancelledError:
-                raise
-            except Exception:
-                logger.exception("Background refresh failed.")
-
-    refresh_task = asyncio.create_task(_refresh_loop())
-
     try:
         yield  # Application is running
 
     finally:
         # --- Shutdown ---
-        refresh_task.cancel()
-        try:
-            await refresh_task
-        except asyncio.CancelledError:
-            pass
-
         await edgar_client.aclose()
         logger.info("Shutting down OpenValuation API.")
 
@@ -136,7 +123,7 @@ app = FastAPI(
 # CORS middleware
 # ---------------------------------------------------------------------------
 
-_raw_origins = os.getenv("ALLOWED_ORIGINS", "http://localhost:5173")
+_raw_origins = os.getenv("ALLOWED_ORIGINS", "http://localhost:5173") # will update later
 ALLOWED_ORIGINS: list[str] = [o.strip() for o in _raw_origins.split(",") if o.strip()]
 
 app.add_middleware(
@@ -162,7 +149,7 @@ app.include_router(export.router, prefix="/api", tags=["Export"])
 # ---------------------------------------------------------------------------
 
 
-@app.get("/health", tags=["Meta"], summary="Health and cache status")
+@app.get("/health", tags=["Meta"], summary="Health and cache status.")
 async def health() -> dict:
     """
     Returns API status and cache statistics.

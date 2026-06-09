@@ -12,13 +12,13 @@ import os
 
 def sec_headers() -> dict[str, str]:
     """
-    Build the User-Agent header required by all SEC.gov endpoints.
+    Builds the User-Agent header required by all SEC.gov endpoints.
 
     See: https://www.sec.gov/developer
     """
     user_agent = os.getenv(
         "EDGAR_USER_AGENT",
-        "OpenValuation/0.1 openvaluation@example.com",
+        "OpenValuation/0.1.0 email@domain.com", # will update later
     )
     return {
         "User-Agent": user_agent,

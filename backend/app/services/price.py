@@ -36,11 +36,8 @@ from __future__ import annotations
 
 import asyncio
 import logging
-import pandas as pd
 from datetime import date, timedelta
 from decimal import Decimal, InvalidOperation
-from typing import Optional
-
 logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
@@ -65,7 +62,7 @@ PRICE_FETCH_TIMEOUT_SECONDS = 15.0
 # ---------------------------------------------------------------------------
 
 
-async def get_price(ticker: str, filing_date: date) -> Optional[Decimal]:
+async def get_price(ticker: str, filing_date: date) -> Decimal | None:
     """
     Return the adjusted close price on the first trading day after `filing_date`.
 
@@ -138,7 +135,7 @@ def _normalise_ticker(ticker: str) -> str:
 
 def _fetch_price_sync(
     ticker: str, window_start: date, window_end: date
-) -> Optional[Decimal]:
+) -> Decimal | None:
     """
     Synchronous yfinance call - run in a thread pool via asyncio.to_thread().
 
@@ -153,6 +150,7 @@ def _fetch_price_sync(
     """
     try:
         import yfinance as yf  # lazy import to allow mocking in tests
+        import pandas as pd    # lazy: defers ~1 s of import-time work to first call
 
         df = yf.download(
             ticker,

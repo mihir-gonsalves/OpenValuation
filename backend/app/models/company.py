@@ -2,12 +2,12 @@
 """
 Company-related Pydantic models.
 
-CompanyCandidate  
+CompanyCandidate:
 - Lightweight result returned by POST /api/search.
 - Identity only: CIK, name, ticker. No SIC or exchange.
 Keeps search fast and deterministic (no external calls).
 
-CompanyMeta       
+CompanyMeta:
 - Full metadata returned as part of GET /api/financials/{cik_10}.
 - Retrieved from the EDGAR submissions endpoint after the user
 selects a company.
@@ -15,15 +15,7 @@ selects a company.
 
 from __future__ import annotations
 
-import re
-
-from pydantic import BaseModel, field_validator
-
-# ---------------------------------------------------------------------------
-# Validation helpers
-# ---------------------------------------------------------------------------
-
-_CIK_10_RE = re.compile(r"^\d{10}$")
+from pydantic import BaseModel, Field, field_validator
 
 # SIC codes 6000-6999 are financial companies (banks, insurance, REITs, etc.).
 # Conventional debt/equity multiples may be less meaningful for these filers.
@@ -77,11 +69,6 @@ def normalise_cik(raw: int | str) -> str:
     return str(int(raw)).zfill(10)
 
 
-def validate_cik_10(cik_10: str) -> bool:
-    """Return True if cik_10 is a valid 10-digit zero-padded CIK string."""
-    return bool(_CIK_10_RE.match(cik_10))
-
-
 # ---------------------------------------------------------------------------
 # Search models
 # ---------------------------------------------------------------------------
@@ -90,17 +77,15 @@ def validate_cik_10(cik_10: str) -> bool:
 class SearchRequest(BaseModel):
     """Request body for POST /api/search."""
 
-    query: str
+    query: str = Field(..., max_length=200)
     """Company name or ticker symbol. Case-insensitive. 1-200 characters."""
 
     @field_validator("query")
     @classmethod
-    def strip_and_validate(cls, v: str) -> str:
+    def strip_and_require_non_empty(cls, v: str) -> str:
         v = v.strip()
         if not v:
             raise ValueError("Query must not be empty.")
-        if len(v) > 200:
-            raise ValueError("Query must not exceed 200 characters.")
         return v
 
 
@@ -154,7 +139,7 @@ class CompanyMeta(BaseModel):
     """4-digit SIC code as a string, e.g. '7372'."""
 
     sic_description: str | None = None
-    """Human-readable SIC description, e.g. 'Prepackaged Software'."""
+    """Human-understandable SIC description, e.g. 'Prepackaged Software'."""
 
     exchange: str | None = None
     """Primary listing exchange, e.g. 'Nasdaq', 'NYSE'."""
@@ -174,9 +159,9 @@ class CompanyMeta(BaseModel):
         
             "name": "Apple Inc.",
             "tickers": ["AAPL"],
-            "exchanges": ["Nasdaq"],
             "sic": "3571",
             "sicDescription": "Electronic Computers",
+            "exchanges": ["Nasdaq"],
             ...
         """
         tickers: list[str] = data.get("tickers") or []

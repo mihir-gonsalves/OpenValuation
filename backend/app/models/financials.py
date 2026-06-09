@@ -37,7 +37,7 @@ class AuditEntry(BaseModel):
     """
 
     concept: str = Field(
-        description="Human-readable concept name, e.g. 'Revenue', 'Operating Cash Flow'."
+        description="Human-understandable concept name, e.g. 'Revenue', 'Operating Cash Flow'."
     )
     xbrl_tag: str | None = Field(
         default=None,
@@ -49,15 +49,26 @@ class AuditEntry(BaseModel):
     )
     unit: str | None = Field(
         default=None,
-        description="Unit of the matched fact, always 'USD' for monetary values.",
+        description="Unit of the matched fact, e.g. 'USD', 'USD/shares', or 'shares'.",
     )
     entity_context: str | None = Field(
-        default=None,
-        description="'consolidated' or 'segment', derived from the XBRL context.",
+        default="consolidated",
+        description=(
+            "'consolidated' or 'segment', derived from the XBRL context. "
+            "Phase 2 hardcodes 'consolidated' - the deduplication rules favour "
+            "non-amendment originals which in practice are always the consolidated "
+            "report. A future phase could parse context IDs to label rare segment-only "
+            "filings. See PHASE_2_SPEC.md §4 (Known limitations)."
+        ),
     )
     value: Decimal | None = Field(
         default=None,
-        description="Raw extracted value before TTM annualisation (None if tag not found).",
+        description=(
+            "The value used for this period's calculation: TTM-bridged for flow "
+            "concepts (revenue, operating income, EPS, ...), point-in-time for "
+            "balance-sheet concepts (debt, cash, equity, ...). None when the tag "
+            "was not found after exhausting all fallbacks."
+        ),
     )
 
 
@@ -75,22 +86,22 @@ class ExtractedFinancials(BaseModel):
     multiple will be N/A.
 
     Balance sheet fields are point-in-time (quarter-end date).  
-    Income statement and cash flow fields are TTM-annualised values.
+    Income statement and cash flow fields are TTM-annualized values.
 
     Phase 1: schema defined with all fields set to None.  
     Phase 2: XBRL extraction logic populates every field.
     """
 
-    period_end: date | None = Field(
-        default=None,
-        description="Quarter end date for this TTM window, e.g. 2024-09-28.",
-    )
     filing_date: date | None = Field(
         default=None,
         description=(
             "Submission timestamp of the most recent quarterly filing in this window. "
             "Used to determine the price fetch date (next trading day after this date)."
         ),
+    )
+    period_end: date | None = Field(
+        default=None,
+        description="Quarter end date for this TTM window, e.g. 2024-09-28.",
     )
 
     # --- Price and shares ---
@@ -107,7 +118,7 @@ class ExtractedFinancials(BaseModel):
         description="EarningsPerShareDiluted (TTM). Falls back to EarningsPerShareBasic.",
     )
 
-    # --- Income statement (TTM-annualised) ---
+    # --- Income statement (TTM-annualized) ---
     revenue: Decimal | None = Field(
         default=None,
         description="RevenueFromContractWithCustomerExcludingAssessedTax, Revenues, or SalesRevenueNet.",
@@ -125,7 +136,7 @@ class ExtractedFinancials(BaseModel):
         description="NetIncomeLoss (TTM).",
     )
 
-    # --- Cash flow (TTM-annualised) ---
+    # --- Cash flow (TTM-annualized) ---
     operating_cash_flow: Decimal | None = Field(
         default=None,
         description="NetCashProvidedByUsedInOperatingActivities.",
@@ -217,13 +228,13 @@ class MultipleSet(BaseModel):
     Phase 3: multiples engine populates each field.
     """
 
-    pe: MultipleValue = MultipleValue(label="P/E")
-    ev_ebitda: MultipleValue = MultipleValue(label="EV/EBITDA")
-    ev_ebit: MultipleValue = MultipleValue(label="EV/EBIT")
-    ev_revenue: MultipleValue = MultipleValue(label="EV/Revenue")
-    ps: MultipleValue = MultipleValue(label="P/S")
-    pb: MultipleValue = MultipleValue(label="P/B")
-    pfcf: MultipleValue = MultipleValue(label="P/FCF")
+    pe:         MultipleValue = Field(default_factory=lambda: MultipleValue(label="P/E"))
+    ev_ebitda:  MultipleValue = Field(default_factory=lambda: MultipleValue(label="EV/EBITDA"))
+    ev_ebit:    MultipleValue = Field(default_factory=lambda: MultipleValue(label="EV/EBIT"))
+    ev_revenue: MultipleValue = Field(default_factory=lambda: MultipleValue(label="EV/Revenue"))
+    ps:         MultipleValue = Field(default_factory=lambda: MultipleValue(label="P/S"))
+    pb:         MultipleValue = Field(default_factory=lambda: MultipleValue(label="P/B"))
+    pfcf:       MultipleValue = Field(default_factory=lambda: MultipleValue(label="P/FCF"))
 
 
 # ---------------------------------------------------------------------------
@@ -262,12 +273,12 @@ class TTMPeriod(BaseModel):
     Column header: 'TTM {period_end}', e.g. 'TTM 2024-09-28'.
     """
 
-    period_end: date = Field(
-        description="Quarter end date for this TTM window."
-    )
     filing_date: date | None = Field(
         default=None,
         description="Submission timestamp of the anchor quarterly filing.",
+    )
+    period_end: date = Field(
+        description="Quarter end date for this TTM window."
     )
     price: Decimal | None = Field(
         default=None,
@@ -290,9 +301,6 @@ class TTMPeriod(BaseModel):
 class FinancialsResponse(BaseModel):
     """
     Full response body for GET /api/financials/{cik_10}.
-
-    `periods` is empty until Phase 2 (XBRL extraction) is implemented.  
-    In Phase 2+, `periods` contains up to 12 TTM periods in reverse-chronological order.
     """
 
     company: CompanyMeta
