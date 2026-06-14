@@ -73,19 +73,18 @@ class WarningCode(str, Enum):
     # --- TTM computation ---
     TTM_ANNUALIZED = "ttm_annualized"
     """Prior-year YTD unavailable (e.g., recent IPO or fiscal year change).
-    TTM approximated via annualization: Annual + (YTD / quarters) × 4.
+    TTM approximated via annualization: YTD / quarters elapsed × 4.
     Result may be less precise than the standard bridge."""
 
     # --- Data integrity ---
     PERIOD_MISMATCH = "period_mismatch"
-    """Income statement facts have misaligned period boundaries (>3 days).
-    Affected facts were rejected, relevant multiples may show N/A.
-    
-    Unused, currently not planned for use. Retained for API completeness."""
+    """Reserved, never raised. The bridge matches flow facts on exact (start, end)
+    keys (see PHASE_2_SPEC §3.3), so a period mismatch returns None / N/A rather
+    than a warning. Kept in the enum for API completeness."""
 
     AMBIGUOUS_FACT = "ambiguous_fact"
     """Multiple XBRL contexts match the same tag and period after deduplication
-    rules (consolidated > segment, original > restated). Value returned as None."""
+    rules (original > amendment). Value returned as None."""
 
     # --- Multiple computation ---
     DENOMINATOR_NEAR_ZERO = "denominator_near_zero"
@@ -99,7 +98,8 @@ class WarningCode(str, Enum):
     # --- Price data ---
     PRICE_UNAVAILABLE = "price_unavailable"
     """Adjusted close price could not be retrieved from yfinance for this
-    period. All price-dependent multiples (P/E, P/S, P/B, P/FCF, EV) are N/A."""
+    period. All price-dependent results (P/E, P/S, P/B, P/FCF, and the
+    EV-based multiples via market cap) are N/A."""
 
 
 # ---------------------------------------------------------------------------
@@ -143,7 +143,7 @@ class ErrorCode(str, Enum):
 
 class Warning(BaseModel):
     """
-    A single structured warning attached to a TTM period.  
+    A single structured warning attached to a TTM period.
     Warnings are surfaced in the API response and in the Excel export.
     They are never silently swallowed.
     """
@@ -151,6 +151,10 @@ class Warning(BaseModel):
     code: WarningCode
     message: str
     """Human-understandable explanation suitable for display in the UI."""
+
+    concept: str | None = None
+    """Concept or tag name for aggregatable codes (TTM_ANNUALIZED, AMENDMENT_EXISTS).
+    Used internally by _dedup_warnings for aggregation, not displayed directly."""
 
     model_config = {"use_enum_values": True}
 
@@ -178,6 +182,6 @@ class APIError(BaseModel):
 # ---------------------------------------------------------------------------
 
 
-def warn(code: WarningCode, message: str) -> Warning:
+def warn(code: WarningCode, message: str, concept: str | None = None) -> Warning:
     """Convenience constructor. Keeps call sites concise."""
-    return Warning(code=code, message=message)
+    return Warning(code=code, message=message, concept=concept)

@@ -15,11 +15,11 @@ Flow:
 7. Return FinancialsResponse.
 
 Phase 2: _build_response is async, it awaits xbrl.extract_ttm_periods()
-         (which internally runs price fetches concurrently). 
+         (which internally runs price fetches concurrently).
          TTMPeriods are returned with empty MultipleSet / EVComponents.
          Phase 2 extraction data is never discarded.
 
-Phase 3: multiples.compute_all() raises not implemented error.
+Phase 3: multiples.compute_all() raises NotImplementedError (stub until Phase 3).
 """
 
 from __future__ import annotations
@@ -33,6 +33,7 @@ import app.cache as cache_store
 from app.models.company import CompanyMeta
 from app.models.financials import EVComponents, FinancialsResponse, MultipleSet, TTMPeriod
 from app.services import edgar, xbrl
+from app.services.xbrl_warnings import dedup_warnings
 
 logger = logging.getLogger(__name__)
 
@@ -62,7 +63,7 @@ async def get_financials(
         ...,
         description="10-digit zero-padded EDGAR CIK, e.g. '0000320193'.",
         pattern=r"^\d{10}$",
-        example="0000320193",
+        examples=["0000320193"],
     ),
 ) -> FinancialsResponse:
     """
@@ -87,8 +88,10 @@ async def get_financials(
     # -------------------------------------------------------------------------
     logger.info("Cache miss for CIK %s - fetching from EDGAR.", cik_10)
 
-    # Re-use the lifespan-managed client so TCP connections to data.sec.gov
-    # are pooled across requests rather than re-opened each time.
+    # Two simultaneous misses for the same CIK both fetch and both write.
+    # The second write wins, both payloads are identical. The duplicate fetch
+    # is accepted: locking here adds complexity for negligible benefit at
+    # this project's traffic level.
     http_client = request.app.state.edgar_client
     metadata, companyfacts = await asyncio.gather(
         edgar.fetch_metadata(cik_10, http_client),
@@ -127,13 +130,12 @@ async def _build_response(
     It is awaited directly - not dispatched to a thread - because the
     extraction work is I/O-bound (price fetches), not CPU-bound.
 
-    Each phase degrades gracefully and independently:
+    Extraction (Phase 2):
+      - Any exception propagates as HTTP 500 internal_error (PHASE_1_SPEC §2.2).
+        The legitimate-empty case (no anchors) returns periods=[] with 200
+        from inside extract_ttm_periods itself.
 
-    Extraction (Phase 2)
-      - Any exception -> logged, empty periods returned (avoids HTTP 500
-        for transient extraction bugs or malformed companyfacts payloads).
-
-    Multiples (Phase 3)
+    Multiples (Phase 3):
       - ImportError or NotImplementedError on the first period -> all remaining
         periods are built with empty MultipleSet / EVComponents. Extraction
         data is never discarded or re-fetched.
@@ -141,20 +143,11 @@ async def _build_response(
         empty, extraction data is preserved.
     """
     # --- Phase 2: XBRL extraction + concurrent price fetches ---
-    try:
-        extracted_periods = await xbrl.extract_ttm_periods(
-            companyfacts,
-            ticker=company_meta.ticker,
-            is_capital_intensive=company_meta.is_capital_intensive,
-        )
-    except Exception:
-        logger.exception("XBRL extraction failed for CIK %s.", company_meta.cik_10)
-        return FinancialsResponse(
-            company=company_meta,
-            periods=[],
-            cached_at=cached_at,
-            data_as_of=datetime.now(timezone.utc),
-        )
+    extracted_periods = await xbrl.extract_ttm_periods(
+        companyfacts,
+        ticker=company_meta.ticker,
+        is_capital_intensive=company_meta.is_capital_intensive,
+    )
 
     # --- Phase 3: multiples computation ---
     multiples_ready = True
@@ -204,10 +197,12 @@ async def _build_response(
                 multiples=multiples_set,
                 ev_components=ev_components,
                 extracted=ef,
-                # warnings = union of all extraction-layer warnings (XBRL extraction
-                # + price fetch, both attached inside extract_ttm_periods) and all
-                # per-multiple warnings from Phase 3.
-                warnings=ef.warnings + multiples_warnings,
+                # warnings = deduped union of all extraction-layer warnings (XBRL
+                # extraction + price fetch, both attached inside extract_ttm_periods)
+                # and all per-multiple warnings from Phase 3. Dedup is applied here
+                # so that ev_debt_missing (which Phase 3 attaches to every EV-based
+                # multiple) collapses to a single warning in the response.
+                warnings=dedup_warnings(ef.warnings + multiples_warnings),
             )
         )
 

@@ -50,7 +50,7 @@ async def export_workbook(
         ...,
         description="10-digit zero-padded EDGAR CIK, e.g. '0000320193'.",
         pattern=r"^\d{10}$",
-        example="0000320193",
+        examples=["0000320193"],
     ),
 ) -> Response:
     """
@@ -71,7 +71,7 @@ async def export_workbook(
     #       # Trigger a full fetch (reuse financials endpoint logic)
     #       ...
     #
-    #   response = _build_response(
+    #   response = await _build_response(
     #       company_meta=entry.payload.company_meta,
     #       companyfacts=entry.payload.companyfacts,
     #       cached_at=entry.cached_at,

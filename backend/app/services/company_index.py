@@ -11,8 +11,10 @@ The dataset (~10 k entries) is loaded once at startup into an in-memory list. It
 lazily on the /api/search path: a search arriving >24h after the last load triggers a rebuild
 before returning (CompanyIndex.maybe_refresh). There is no background task.
 
-All search queries operate exclusively on in-memory data.
-Zero external network calls are made during search, ensuring deterministic latency.
+Search queries never call EDGAR or any per-query external service, matching runs
+entirely against the in-memory index. The only network activity on the search path
+is the index refresh, which runs at most once per 24 hours (the triggering request
+waits for it, concurrent requests wait on the same refresh).
 
 Search algorithm
 ----------------
@@ -50,6 +52,7 @@ logger = logging.getLogger(__name__)
 
 TICKERS_URL = "https://www.sec.gov/files/company_tickers.json"
 REFRESH_INTERVAL_SECONDS = 24 * 3600  # 24 hours
+REFRESH_FAILURE_COOLDOWN_SECONDS = 300  # don't re-attempt a failed refresh for 5 min
 MAX_RESULTS = 5
 LOAD_TIMEOUT_SECONDS = 20.0
 
@@ -81,6 +84,7 @@ class CompanyIndex:
     def __init__(self) -> None:
         self._entries: list[_IndexEntry] = []
         self._last_loaded_at: float = 0.0   # time.monotonic()
+        self._last_attempt_at: float = 0.0  # time.monotonic(), set on every refresh try
         self._lock = asyncio.Lock()
 
     # ------------------------------------------------------------------
@@ -101,19 +105,26 @@ class CompanyIndex:
     async def maybe_refresh(self) -> None:
         """
         Refresh the index if it is older than REFRESH_INTERVAL_SECONDS.
+        After a failed refresh, waits REFRESH_FAILURE_COOLDOWN_SECONDS before
+        re-attempting, so SEC outages don't stall every search for up to 20s.
         Errors during refresh are logged but do not propagate to the caller.
         """
-        if time.monotonic() - self._last_loaded_at < REFRESH_INTERVAL_SECONDS:
+        now = time.monotonic()
+        if now - self._last_loaded_at < REFRESH_INTERVAL_SECONDS:
             return
+        if now - self._last_attempt_at < REFRESH_FAILURE_COOLDOWN_SECONDS:
+            return  # recent attempt failed, serve stale index without re-fetching
         try:
             async with self._lock:
-                # Re-check after acquiring the lock: another coroutine may have
-                # already refreshed while we were waiting.
-                if time.monotonic() - self._last_loaded_at < REFRESH_INTERVAL_SECONDS:
+                now = time.monotonic()
+                if now - self._last_loaded_at < REFRESH_INTERVAL_SECONDS:
                     return
+                if now - self._last_attempt_at < REFRESH_FAILURE_COOLDOWN_SECONDS:
+                    return
+                self._last_attempt_at = now
                 await self._fetch_and_build()
         except Exception as exc:
-            logger.warning("Background index refresh failed: %s.", exc)
+            logger.warning("Lazy index refresh failed: %s.", exc)
 
     def search(self, query: str) -> list[CompanyCandidate]:
         """

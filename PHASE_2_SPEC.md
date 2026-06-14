@@ -1,6 +1,6 @@
 # PHASE_2_SPEC.md - XBRL Extraction & TTM Bridge
 
-**Phase:** 2  **Status:** Reviewing  **Implemented in:** `backend/`
+**Phase:** 2  **Status:** Complete  **Implemented in:** `backend/`
 
 ## What this document is
 
@@ -177,6 +177,11 @@ never has to second-guess the sign.
    Dedup favors the authoritative (consolidated) filing in practice. See the note
    on `AuditEntry.entity_context` in `app/models/financials.py`.
 3. **`PERIOD_MISMATCH` is structurally unreachable** by design - see §3.3.
+4. **Amendment-only anchors are skipped.** `_collect_filing_anchors` filters out
+   accession numbers whose form type ends in `/A`. If a company's most recent
+   quarter was filed exclusively as a `10-Q/A` (no original `10-Q`), that quarter
+   is excluded from the anchor list and the returned window will be one quarter
+   older than expected.
 
 
 
@@ -308,7 +313,7 @@ Phase 3 (`services/multiples.py`) depends only on:
 - The `extract_ttm_periods` signature (§1) and the `ExtractedFinancials` schema
   (`app/models/financials.py`), both stable.
 - The router contract for merging multiples warnings into `TTMPeriod.warnings`,
-  specified in `PHASE_1_SPEC.md` §9.2 and already wired in
+  specified in `PHASE_1_SPEC.md` §6.2 and already wired in
   `app/routers/financials.py` (the `_MULTIPLE_FIELDS` loop).
 
 Internal restructuring of the extraction layer (including the `xbrl_maps.py` split)

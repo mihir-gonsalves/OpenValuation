@@ -1,13 +1,13 @@
 # OpenValuation: Project Status
 
 **Last Updated:** 2026-06-09  
-**Current Phase:** Phase 2.
+**Current Phase:** Phase 3 - Multiples Engine (Phase 2 complete, under review).
 
 ## Overview
 
 A free, no-account web tool that computes valuation multiples for any publicly traded U.S. company using SEC EDGAR filings and period-specific historical prices.
 
-Each filing uses the adjusted close on the next trading day after submission. This reflects the first price where the market had full visibility into the disclosed data.
+Each filing uses the split-adjusted close on the next trading day after submission. This reflects the first price where the market had full visibility into the disclosed data.
 
 **Stack**
 
@@ -90,7 +90,7 @@ TTM bridge:
 Fallback:
 
 * If prior-year YTD is missing
-* Use: Most Recent Annual + (Current YTD ÷ quarters) × 4
+* Use: Current YTD ÷ quarters elapsed × 4
 * Apply `ttm_annualized` warning
 
 ### Enterprise Value
@@ -114,8 +114,9 @@ Key rules:
 Debt handling:
 
 * `LongTermDebtNoncurrent` is primary
-* If `LongTermDebt` approximates total debt, it is not added separately
-* Apply `debt_deduplicated` warning when adjustment occurs
+* `LongTermDebt` (total, current + non-current) is the fallback when the primary is absent
+   * When used, current portion of LT debt is zeroed out to avoid double-counting
+* Apply `debt_deduplicated` warning when the fallback fires
 
 Leases:
 
@@ -132,6 +133,7 @@ EBITDA limitation:
 
 * EBITDA = Operating Income + D&A
 * Incomplete D&A tagging can understate EBITDA
+   * When D&A is absent, EV/EBITDA is N/A
 
 ### Multiples
 
@@ -166,12 +168,11 @@ Primary principle: no silent wrong values.
 
 * Only USD facts accepted
 * Non-USD facts rejected
-* Scaling normalized when possible
-* Ambiguous scaling rejected
+* Scale normalization is not required: the EDGAR companyfacts API reports values in full (unscaled) units
 
 Duplicate handling:
 
-* Priority order: consolidated > segment, original > restated
+* Priority order: original > amendment
 * Remaining ambiguity returns `None` with `ambiguous_fact`
 
 Period validation:
@@ -223,7 +224,7 @@ Status: Complete
 
 ### Phase 2: XBRL Extraction and TTM Logic
 
-Status: In progress (near complete)
+Status: Complete
 
 Highest risk area.
 

@@ -5,9 +5,9 @@ POST /api/search
 Resolves a company name or ticker to up to five CIK candidates.
 
 Design constraints:
-  - Zero external network calls during search.
-  - All queries operate on the in-memory company index loaded at startup.
-  - Deterministic, sub-millisecond latency.
+  - Search queries never call EDGAR or any per-query external service, matching runs
+    entirely against the in-memory index. The only network activity on the search path
+    is the index refresh, which runs at most once per 24 hours.
   - SIC and exchange are NOT returned here, retrieved only after company selection
     via GET /api/financials/{cik_10}.
 """

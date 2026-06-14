@@ -11,6 +11,9 @@ Coverage:
   - Non-positive price -> None returned
   - yfinance exception -> None returned (price_unavailable surfaced by caller)
   - Fetch timeout -> None returned
+  - get_prices batch: single download, one result per filing date
+  - get_prices batch: failure -> all-None dict
+  - get_prices batch: empty list -> empty dict
 """
 
 from __future__ import annotations
@@ -19,12 +22,19 @@ import asyncio
 import threading
 from datetime import date
 from decimal import Decimal
-from unittest.mock import patch
+from unittest.mock import MagicMock, call, patch
 
 import pandas as pd
 import pytest
 
-from app.services.price import _fetch_price_sync, _normalise_ticker, get_price
+from app.services.price import (
+    _download_window_sync,
+    _fetch_price_sync,
+    _first_close_after,
+    _normalise_ticker,
+    get_price,
+    get_prices,
+)
 
 
 # ---------------------------------------------------------------------------
@@ -60,6 +70,18 @@ def test_fetch_price_sync_returns_decimal():
 
     assert result == Decimal("182.3456")
     assert isinstance(result, Decimal)
+
+
+def test_fetch_price_sync_uses_auto_adjust_false():
+    """yfinance must be called with auto_adjust=False (split-adjusted only, no dividends)."""
+    mock_df = pd.DataFrame(
+        {"Close": [150.0]},
+        index=[pd.Timestamp("2024-02-02")],
+    )
+    with patch("yfinance.download", return_value=mock_df) as mock_download:
+        _fetch_price_sync("AAPL", date(2024, 2, 2), date(2024, 2, 16))
+    _, kwargs = mock_download.call_args
+    assert kwargs.get("auto_adjust") is False
 
 
 def test_fetch_price_sync_rounds_to_4dp():
@@ -145,7 +167,7 @@ async def test_get_price_timeout_returns_none():
         release.wait(timeout=30)
 
     try:
-        with patch("app.services.price._fetch_price_sync", side_effect=_block), \
+        with patch("app.services.price._download_window_sync", side_effect=_block), \
              patch("app.services.price.PRICE_FETCH_TIMEOUT_SECONDS", 0.01):
             result = await get_price("AAPL", date(2024, 2, 1))
         assert result is None
@@ -155,14 +177,108 @@ async def test_get_price_timeout_returns_none():
 
 @pytest.mark.asyncio
 async def test_get_price_normalises_ticker_before_call():
-    """Verify BRK.A is normalised to BRK-A before being passed to _fetch_price_sync."""
+    """Verify BRK.A is normalised to BRK-A before being passed to _download_window_sync."""
     captured = {}
 
-    def _fake_fetch(ticker, start, end):
+    def _fake_download(ticker, start, end):
         captured["ticker"] = ticker
         return pd.DataFrame({"Close": [500.0]}, index=[pd.Timestamp("2024-01-02")])
 
-    with patch("app.services.price._fetch_price_sync", side_effect=_fake_fetch):
+    with patch("app.services.price._download_window_sync", side_effect=_fake_download):
         await get_price("BRK.A", date(2024, 1, 1))
 
     assert captured["ticker"] == "BRK-A"
+
+
+# ---------------------------------------------------------------------------
+# get_prices (batch) - happy path
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_get_prices_returns_price_per_date():
+    """Single batch download resolves a price for each filing date."""
+    filing_dates = [date(2024, 1, 1), date(2024, 4, 1)]
+    mock_df = pd.DataFrame(
+        {"Close": [150.0, 160.0, 155.0]},
+        index=[
+            pd.Timestamp("2024-01-02"),
+            pd.Timestamp("2024-04-02"),
+            pd.Timestamp("2024-04-03"),
+        ],
+    )
+
+    with patch("app.services.price._download_window_sync", return_value=mock_df):
+        result = await get_prices("AAPL", filing_dates)
+
+    assert result[date(2024, 1, 1)] == Decimal("150.0000")
+    assert result[date(2024, 4, 1)] == Decimal("160.0000")
+
+
+@pytest.mark.asyncio
+async def test_get_prices_single_download():
+    """get_prices issues exactly one _download_window_sync call regardless of how many dates."""
+    filing_dates = [date(2024, 1, 1), date(2024, 4, 1), date(2024, 7, 1)]
+    mock_df = pd.DataFrame(
+        {"Close": [100.0, 110.0, 120.0]},
+        index=[
+            pd.Timestamp("2024-01-02"),
+            pd.Timestamp("2024-04-02"),
+            pd.Timestamp("2024-07-02"),
+        ],
+    )
+
+    with patch("app.services.price._download_window_sync", return_value=mock_df) as mock_dl:
+        await get_prices("AAPL", filing_dates)
+
+    assert mock_dl.call_count == 1
+
+
+@pytest.mark.asyncio
+async def test_get_prices_empty_list_returns_empty_dict():
+    result = await get_prices("AAPL", [])
+    assert result == {}
+
+
+@pytest.mark.asyncio
+async def test_get_prices_download_failure_returns_all_none():
+    """On any download failure, all dates map to None."""
+    filing_dates = [date(2024, 1, 1), date(2024, 4, 1)]
+
+    with patch("app.services.price._download_window_sync", return_value=None):
+        result = await get_prices("AAPL", filing_dates)
+
+    assert result == {date(2024, 1, 1): None, date(2024, 4, 1): None}
+
+
+@pytest.mark.asyncio
+async def test_get_prices_normalises_ticker():
+    """Batch fetch normalises the ticker the same way as get_price."""
+    captured = {}
+
+    def _fake_download(ticker, start, end):
+        captured["ticker"] = ticker
+        return pd.DataFrame({"Close": [500.0]}, index=[pd.Timestamp("2024-01-02")])
+
+    with patch("app.services.price._download_window_sync", side_effect=_fake_download):
+        await get_prices("BRK.A", [date(2024, 1, 1)])
+
+    assert captured["ticker"] == "BRK-A"
+
+
+@pytest.mark.asyncio
+async def test_get_prices_timeout_returns_all_none():
+    """On timeout, all dates map to None."""
+    release = threading.Event()
+
+    def _block(*_a, **_k):
+        release.wait(timeout=30)
+
+    filing_dates = [date(2024, 1, 1), date(2024, 4, 1)]
+    try:
+        with patch("app.services.price._download_window_sync", side_effect=_block), \
+             patch("app.services.price.PRICE_FETCH_TIMEOUT_SECONDS", 0.01):
+            result = await get_prices("AAPL", filing_dates)
+        assert result == {date(2024, 1, 1): None, date(2024, 4, 1): None}
+    finally:
+        release.set()

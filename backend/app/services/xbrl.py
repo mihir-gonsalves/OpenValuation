@@ -60,14 +60,13 @@ from app.services.xbrl_maps import (
     _InstantCache,
     _InstantEntry,
     _MAX_ANNUAL_DAYS,
-    _MIN_ANNUAL_DAYS,
     _ambiguous_near,
     _build_flow_map,
     _build_instant_map,
     _get_instant_result,
     _get_ttm_value,
 )
-from app.services.xbrl_warnings import _dedup_warnings, _make_flow_warnings
+from app.services.xbrl_warnings import dedup_warnings, _make_flow_warnings
 
 logger = logging.getLogger(__name__)
 
@@ -131,7 +130,6 @@ _INSTANT_CHAINS: dict[str, list[str]] = {
     "total_assets": ["Assets"],
     "stockholders_equity": [
         "StockholdersEquity",
-        "StockholdersEquityAttributableToParent",
     ],
     # LongTermDebtNoncurrent is primary, LongTermDebt is the fallback that
     # triggers the debt_deduplicated logic (see _extract_debt).
@@ -145,7 +143,6 @@ _INSTANT_CHAINS: dict[str, list[str]] = {
     ],
     "current_portion_lt_debt": [
         "LongTermDebtCurrent",
-        "LongTermNotesPayableCurrent",
     ],
     "finance_lease_current": [
         "FinanceLeaseLiabilityCurrent",
@@ -160,12 +157,10 @@ _INSTANT_CHAINS: dict[str, list[str]] = {
         "CashCashEquivalentsAndShortTermInvestments",
     ],
     "minority_interest": [
-        "NoncontrollingInterest",
         "MinorityInterest"
     ],
     "preferred_stock": [
         "PreferredStockValue",
-        "PreferredStockRedeemableValue",
     ],
 }
 
@@ -468,6 +463,7 @@ def _get_shares(
                     warnings.append(warn(
                         WarningCode.AMENDMENT_EXISTS,
                         f"Amendment filing used for '{_GAAP_SHARES_TAG}'; period: {matched_date}.",
+                        concept=_GAAP_SHARES_TAG,
                     ))
                 return value, _GAAP_SHARES_TAG, warnings
 
@@ -482,6 +478,8 @@ def _get_shares(
                 ))
 
     # --- 2. DEI EntityCommonStockSharesOutstanding (matched by accn) ---
+    # Unlike the GAAP path, the DEI path has no amendment fallback: /A forms are
+    # filtered out with no substitute, because the DEI tag has no dedup map.
     if _DEI_SHARES_TAG in dei:
         dei_candidates = [
             f for f in dei[_DEI_SHARES_TAG].get("units", {}).get("shares", [])
@@ -599,6 +597,7 @@ def _resolve_instant(
                 result_warnings.append(warn(
                     WarningCode.AMENDMENT_EXISTS,
                     f"Amendment filing used for '{tag}'; period: {matched_date}.",
+                    concept=tag,
                 ))
             return _ConceptResult(
                 value=value,
@@ -1077,8 +1076,8 @@ async def extract_ttm_periods(
     Returns
     -------
     Up to 12 `ExtractedFinancials`, most-recent-first. Prices are populated
-    via yfinance with one concurrent fetch per period, `price` is None
-    until the gather completes.
+    via a single batch yfinance download covering all anchor dates, `price`
+    is None until the download completes.
     """
     gaap = companyfacts.get("facts", {}).get("us-gaap", {})
     dei = companyfacts.get("facts", {}).get("dei", {})
@@ -1103,17 +1102,15 @@ async def extract_ttm_periods(
         for a in anchors
     ]
 
-    # --- Step 5: fetch prices concurrently, then apply results sequentially ---
-    # The mutations run in a separate synchronous pass after the gather completes.
-    # Keeping mutations out of the async closures means no ExtractedFinancials 
-    # is captured mid-flight by a coroutine.
+    # --- Step 5: fetch prices with a single batch download, apply sequentially ---
+    # One yfinance request spans [min(filed)+1, max(filed)+14], covering all
+    # anchor dates. This avoids Yahoo rate-limiting from up to 12 simultaneous
+    # requests and removes ~11 network round-trips per API call.
     if ticker:
-        fetched_prices = await asyncio.gather(*[
-            price_svc.get_price(ticker, a.filed) for a in anchors
-        ])
-        for ef, price in zip(periods, fetched_prices):
-            ef.price = price
-            if price is None:
+        fetched = await price_svc.get_prices(ticker, [a.filed for a in anchors])
+        for ef, anchor in zip(periods, anchors):
+            ef.price = fetched.get(anchor.filed)
+            if ef.price is None:
                 ef.warnings.append(warn(
                     WarningCode.PRICE_UNAVAILABLE,
                     f"Adjusted close price unavailable for {ticker} "
@@ -1127,6 +1124,6 @@ async def extract_ttm_periods(
     # per period, but running dedup makes that invariant robust to future
     # warning attachment points.
     for ef in periods:
-        ef.warnings = _dedup_warnings(ef.warnings)
+        ef.warnings = dedup_warnings(ef.warnings)
 
     return periods

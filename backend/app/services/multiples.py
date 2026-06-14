@@ -91,16 +91,19 @@ def compute_enterprise_value(f: ExtractedFinancials) -> tuple[Decimal | None, EV
 
 def compute_pe(
     price: Decimal | None,
-    eps_diluted: Decimal | None,
-    eps_basic: Decimal | None = None,
+    eps: Decimal | None,
+    *,
+    eps_is_basic: bool = False,
 ) -> tuple[Decimal | None, str, list[Warning]]:
     """
-    P/E = Price ÷ Diluted EPS (TTM).
-    
-    Falls back to basic EPS if diluted is unavailable (label changes to 'P/E (basic)').  
-    Returns (value, label, warnings).
-    
-    Phase 1: raises NotImplementedError.
+    P/E = Price ÷ EPS (TTM).
+
+    `eps` is ExtractedFinancials.eps_diluted, which already holds basic EPS when
+    the diluted tag was absent (Phase 2 fallback). `eps_is_basic` is derived from
+    the 'EPS' audit entry's is_fallback flag and only changes the label to
+    'P/E (basic)' - the fallback_eps_basic warning was already attached in Phase 2.
+
+    Phase 3: raises NotImplementedError.
     """
     raise NotImplementedError("Phase 3")
 

@@ -182,7 +182,7 @@ class TestTgtDebt:
     def test_fy2026_used_total_signals_current_portion_must_be_zeroed(self, tgt):
         """
         used_total=True means the caller must zero current_portion_lt_debt.
-        The end-to-end test verifies this happens; here we confirm the signal.
+        The end-to-end test verifies this happens; here the signal is confirmed.
         """
         _, used_total = _extract_debt(_gaap(tgt), date(2026, 1, 31))
         assert used_total is True

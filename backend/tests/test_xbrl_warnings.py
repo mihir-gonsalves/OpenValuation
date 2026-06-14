@@ -4,7 +4,7 @@ Tests for app/services/xbrl_warnings.py.
 
 Coverage
 --------
-TestDedupWarningsHelper         _dedup_warnings - basic properties
+TestDedupWarningsHelper         dedup_warnings - basic properties
 TestDedupWarningsAggregation    AMENDMENT_EXISTS aggregation # aggregation regression guard
 TestMakeFlowWarnings            _make_flow_warnings in isolation
 test_no_orphan_warning_codes    every WarningCode is raised or documented # orphan-code guard
@@ -19,7 +19,7 @@ from decimal import Decimal
 import pytest
 
 from app.models.errors import Warning, WarningCode, warn
-from app.services.xbrl_warnings import _dedup_warnings, _make_flow_warnings
+from app.services.xbrl_warnings import dedup_warnings, _make_flow_warnings
 
 
 # ===========================================================================
@@ -28,17 +28,17 @@ from app.services.xbrl_warnings import _dedup_warnings, _make_flow_warnings
 # ===========================================================================
 
 class TestDedupWarningsHelper:
-    """Direct tests for _dedup_warnings."""
+    """Direct tests for dedup_warnings."""
 
     def test_distinct_codes_unchanged(self):
-        result = _dedup_warnings([
+        result = dedup_warnings([
             warn(WarningCode.PRICE_UNAVAILABLE, "no price"),
             warn(WarningCode.EV_DEBT_MISSING, "no debt"),
         ])
         assert len(result) == 2
 
     def test_non_aggregatable_duplicates_collapsed_to_first(self):
-        result = _dedup_warnings([
+        result = dedup_warnings([
             warn(WarningCode.PRICE_UNAVAILABLE, "first"),
             warn(WarningCode.PRICE_UNAVAILABLE, "second"),
         ])
@@ -46,16 +46,16 @@ class TestDedupWarningsHelper:
         assert result[0].message == "first"
 
     def test_aggregatable_codes_merged_into_one(self):
-        result = _dedup_warnings([
-            warn(WarningCode.TTM_ANNUALIZED, "Prior-year YTD unavailable for Revenue; TTM annualized."),
-            warn(WarningCode.TTM_ANNUALIZED, "Prior-year YTD unavailable for Operating Cash Flow; TTM annualized."),
+        result = dedup_warnings([
+            warn(WarningCode.TTM_ANNUALIZED, "...", concept="Revenue"),
+            warn(WarningCode.TTM_ANNUALIZED, "...", concept="Operating Cash Flow"),
         ])
         assert len(result) == 1
         assert "Revenue" in result[0].message
         assert "Operating Cash Flow" in result[0].message
 
     def test_order_preserved(self):
-        result = _dedup_warnings([
+        result = dedup_warnings([
             warn(WarningCode.PRICE_UNAVAILABLE, "price"),
             warn(WarningCode.EV_DEBT_MISSING, "debt"),
             warn(WarningCode.CAPEX_SIGN_NORMALIZED, "capex"),
@@ -78,12 +78,10 @@ class TestDedupWarningsAggregation:
     """
 
     def test_amendment_exists_aggregates_two_flow_tags(self):
-        """Two AMENDMENT_EXISTS warnings with quoted tags collapse to one."""
-        result = _dedup_warnings([
-            warn(WarningCode.AMENDMENT_EXISTS,
-                 "Amendment filing used for 'LongTermDebt'; period 2024-01-01-2024-12-31."),
-            warn(WarningCode.AMENDMENT_EXISTS,
-                 "Amendment filing used for 'Assets'; period 2024-12-31."),
+        """Two AMENDMENT_EXISTS warnings with concept field collapse to one."""
+        result = dedup_warnings([
+            warn(WarningCode.AMENDMENT_EXISTS, "...", concept="LongTermDebt"),
+            warn(WarningCode.AMENDMENT_EXISTS, "...", concept="Assets"),
         ])
         assert len(result) == 1
         msg = result[0].message
@@ -92,11 +90,9 @@ class TestDedupWarningsAggregation:
 
     def test_amendment_exists_aggregates_shares_and_flow(self):
         """Shares + flow amendment warnings must both appear in the merged message."""
-        result = _dedup_warnings([
-            warn(WarningCode.AMENDMENT_EXISTS,
-                 "Amendment filing used for 'CommonStockSharesOutstanding'; period 2024-12-31."),
-            warn(WarningCode.AMENDMENT_EXISTS,
-                 "Amendment filing used for 'LongTermDebt'; period 2024-01-01-2024-12-31."),
+        result = dedup_warnings([
+            warn(WarningCode.AMENDMENT_EXISTS, "...", concept="CommonStockSharesOutstanding"),
+            warn(WarningCode.AMENDMENT_EXISTS, "...", concept="LongTermDebt"),
         ])
         assert len(result) == 1
         msg = result[0].message
@@ -105,24 +101,19 @@ class TestDedupWarningsAggregation:
 
     def test_amendment_exists_dedupes_repeated_tag(self):
         """Same tag named twice - should appear exactly once in the merged message."""
-        result = _dedup_warnings([
-            warn(WarningCode.AMENDMENT_EXISTS,
-                 "Amendment filing used for 'LongTermDebt'; period 2024-12-31."),
-            warn(WarningCode.AMENDMENT_EXISTS,
-                 "Amendment filing used for 'LongTermDebt'; period 2024-12-31."),
+        result = dedup_warnings([
+            warn(WarningCode.AMENDMENT_EXISTS, "...", concept="LongTermDebt"),
+            warn(WarningCode.AMENDMENT_EXISTS, "...", concept="LongTermDebt"),
         ])
         assert len(result) == 1
         assert result[0].message.count("LongTermDebt") == 1
 
     def test_ttm_annualized_aggregates_three_concepts(self):
-        """Pre-existing TTM_ANNUALIZED format still works after any regex changes."""
-        result = _dedup_warnings([
-            warn(WarningCode.TTM_ANNUALIZED,
-                 "Prior-year YTD unavailable for Revenue; TTM annualized."),
-            warn(WarningCode.TTM_ANNUALIZED,
-                 "Prior-year YTD unavailable for Operating Cash Flow; TTM annualized."),
-            warn(WarningCode.TTM_ANNUALIZED,
-                 "Prior-year YTD unavailable for CapEx; TTM annualized."),
+        """TTM_ANNUALIZED aggregation uses concept field, not message format."""
+        result = dedup_warnings([
+            warn(WarningCode.TTM_ANNUALIZED, "...", concept="Revenue"),
+            warn(WarningCode.TTM_ANNUALIZED, "...", concept="Operating Cash Flow"),
+            warn(WarningCode.TTM_ANNUALIZED, "...", concept="CapEx"),
         ])
         assert len(result) == 1
         assert "Revenue" in result[0].message

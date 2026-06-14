@@ -13,7 +13,7 @@ This project is built entirely on zero-cost infrastructure. Tradeoffs are docume
 ### Prerequisites
 
 - Node.js 18+
-- Python 3.11+
+- Python 3.10+
 
 ### Run Locally
 
@@ -28,6 +28,8 @@ uvicorn app.main:app --reload --port 8000
 ```
 
 **Frontend**
+
+*(Frontend arrives in Phase 4 - not yet in the repository.)*
 
 ```bash
 cd frontend
@@ -68,12 +70,13 @@ The 12 most recent quarterly filing periods (10-Q and 10-K) are selected from th
 
 ### 3. Price Data
 
-Price is defined as the adjusted close on the next trading day following the filing submission timestamp. This price reflects the first point at which the market had full visibility into the disclosed figures.
+Price is defined as the split-adjusted close on the next trading day following the filing submission timestamp. This price reflects the first point at which the market had full visibility into the disclosed figures.
 
-Adjusted close is used to ensure stock splits don't distort cross-period comparisons.
+Split-adjusted close is used to ensure stock splits don't distort cross-period comparisons. Dividend reinvestment is not factored in.
 
 Shares and pricing inputs are handled as follows:
 - **Shares outstanding** are extracted from XBRL (`CommonStockSharesOutstanding`) and matched to the filing period
+  - The DEI tag `EntityCommonStockSharesOutstanding` fallback is matched by accession number
 - **Market capitalization** is calculated using basic shares outstanding
 - **P/E** uses diluted EPS (`EarningsPerShareDiluted`), falling back to basic EPS when unavailable, with labeling applied
 
@@ -127,7 +130,7 @@ EBITDA = Operating Income
        + Depreciation & Amortization
 ```
 
-Depreciation and amortization may be fragmented across tags or omitted. No reconstruction is attempted beyond the defined tag set, which can understate EBITDA and inflate EV/EBITDA.
+Depreciation and amortization may be fragmented across tags or omitted. No reconstruction is attempted beyond the defined tag set, which can understate EBITDA and inflate EV/EBITDA. When D&A is absent, EV/EBITDA is reported as N/A rather than as a proxy for EV/EBIT.
 
 **Free Cash Flow**
 
@@ -142,7 +145,7 @@ If FCF is negative or required tags are missing, P/FCF is shown as `N/A` with an
 
 While derived from quarterly filings, TTM periods reflect annualized performance rather than single-quarter results.
 
-Twelve TTM periods are constructed from the 12 most recent quarterly filings, stepping back one quarter at a time. Each TTM period represents a rolling 12-month window anchored to a specific quarter end date, columns are labelled `TTM [quarter end date]`.
+Twelve TTM periods are constructed from the 12 most recent quarterly filings, stepping back one quarter at a time. Each TTM period represents a rolling 12-month window anchored to a specific quarter end date, columns are labeled `TTM [quarter end date]`.
 
 - Income statement and cash flow items are TTM-annualized
 - Balance sheet items are point-in-time as of the period end date
@@ -153,10 +156,12 @@ All periods are displayed in a single table. A "data as of" timestamp indicates 
 
 - Negative multiples are shown as negative values, except for P/FCF
 - `N/A` is used only when required data is missing
-- Zero or negative denominators do not trigger `N/A` unless effectively zero, with one exception: if Stockholders' Equity is negative
-  - Exception: P/B is shown as `N/A` with a `negative_book_value` warning - a negative P/B is not analytically interpretable in the same way a negative P/E is, so the near-zero guard alone does not cover this case
-
-Denominators with absolute value below 0.01 are treated as zero. In such cases, the multiple is shown as `N/A` with a `denominator_near_zero` note.
+- Zero/near-zero denominators (|x| < 0.01) -> `N/A` with `denominator_near_zero`
+- Negative denominators are allowed and produce negative multiples, with two
+  exceptions: 
+    - Negative FCF -> `N/A`
+    - Negative Stockholders' Equity -> P/B is `N/A` with `negative_book_value`
+    (a negative P/B is not analytically interpretable the way a negative P/E is)
 
 Warnings such as `ev_debt_missing` or `fallback_eps_basic` are displayed inline per period.
 
@@ -261,9 +266,17 @@ Where price data is unavailable or the ticker format can't be normalized (e.g., 
 
 Micro-cap companies and older filings sometimes use non-standard or legacy tags. The backend applies fallback logic for each concept. If all fallbacks fail, the relevant multiple is displayed as `N/A`. 
 
-All monetary values are validated against their `unitRef`, non-USD values are instantly rejected. USD values reported with scaling (e.g., thousands or millions) are normalized where possible, otherwise they are rejected to prevent scale errors.
+All monetary values are validated against their `unitRef`, non-USD facts are rejected. Scale normalization is not required: the EDGAR companyfacts API reports values in full (unscaled) units.
 
 Financial companies (SIC 6000–6999) are flagged in the UI. Conventional debt/equity definitions don't map cleanly onto bank balance sheets, so multiples may be less meaningful for these filers.
+
+### EPS TTM Bridge
+
+P/E is computed as price ÷ diluted EPS, where EPS is extracted directly as reported (not reconstructed from net income ÷ diluted shares). The TTM bridge (`Annual + Current YTD - Prior YTD`) is applied to EPS just like any other flow item. This is an approximation: because share counts change each period, a correct TTM EPS would weight each quarter's per-share figure by its own share count, which requires summing four individual quarter values. The approximation is consistent with how many data providers compute TTM EPS, but may diverge from a precise calculation for companies undergoing significant share count changes.
+
+### Transition Period Filings
+
+Companies that change their fiscal year end file a "transition period" 10-K covering fewer than 12 months. The TTM bridge treats the transition-period filing as if it were a standard annual, which will produce an incorrect TTM for the periods anchored to it. A `ttm_annualized` warning fires in some of these cases (when prior-year YTD is missing), but not always.
 
 ### Operating Leases
 
@@ -280,6 +293,8 @@ When both an original filing (e.g., `10-Q`, `10-K`) and an amended filing (`10-Q
 If the original filing is unavailable, the amended filing is used as a fallback.
 
 The tool continues to use the original filing for consistency across concepts, which may result in using values that were later restated.
+
+**Limitation:** the anchor selection (which quarterly filing anchors each TTM period) also excludes amendment-only filings. If a company's most recent quarter was submitted exclusively as a `10-Q/A` with no original `10-Q`, that quarter will be skipped and the most recent available period will be one quarter older than expected.
 
 
 ## Project Structure (Planned, Not Enforced)
@@ -311,17 +326,24 @@ OpenValuation/
 │   │   └── user_agent.py            EDGAR User Agent Setup     
 │   ├── tests/
 │   │   ├── test_edgar.py
-│   │   ├── test_multiples.py
 │   │   ├── test_price.py
+│   │   ├── test_search.py
+│   │   ├── test_xbrl.py
+│   │   ├── test_xbrl_maps.py
+│   │   ├── test_xbrl_warnings.py
+│   │   ├── test_xbrl_extended.py
+│   │   ├── test_xbrl_aapl_msft.py
+│   │   ├── test_api_errors.py
+│   │   ├── test_financials_route.py
 │   │   └── fixtures/
-│   │       ├── aapl_companyfacts.json
-│   │       ├── msft_companyfacts.json
-│   │       ├── crct_companyfacts.json
-│   │       ├── dal_companyfacts.json
-│   │       ├── tgt_companyfacts.json
-│   │       ├── snow_companyfacts.json
-│   │       ├── cart_companyfacts.json
-│   │       └── brkb_companyfacts.json
+│   │       ├── aapl_CIK0000320193.json
+│   │       ├── msft_CIK0000789019.json
+│   │       ├── crct_CIK0001828962.json
+│   │       ├── dal_CIK0000027904.json
+│   │       ├── tgt_CIK0000027419.json
+│   │       ├── snow_CIK0001640147.json
+│   │       ├── cart_CIK0001579091.json
+│   │       └── brkb_CIK0001067983.json
 │   └── requirements.txt
 ├── frontend/
 │   ├── src/
@@ -362,7 +384,7 @@ OpenValuation/
 
 ### Yahoo Finance (yfinance)
 
-- **Provides:** Historical adjusted close prices for filing-date price matching
+- **Provides:** Historical split-adjusted close prices for filing-date price matching
 - **Authentication:** None required
 - **Reliability:** Unofficial - see Limitations
 
@@ -374,22 +396,22 @@ All tags are from the `us-gaap` taxonomy. Tags are listed in fallback order. The
 
 | Concept | Primary Tag | Fallback Tag(s) |
 |---|---|---|
-| Shares Outstanding | `CommonStockSharesOutstanding` | — |
+| Shares Outstanding | `CommonStockSharesOutstanding` | `EntityCommonStockSharesOutstanding` (DEI, matched by filing accession) |
 | Revenue | `RevenueFromContractWithCustomerExcludingAssessedTax` | `Revenues`, `SalesRevenueNet`, `RevenueFromContractWithCustomerIncludingAssessedTax` |
 | Net Income | `NetIncomeLoss` | — |
 | EBIT | `OperatingIncomeLoss` | — |
 | D&A | `DepreciationDepletionAndAmortization` | `DepreciationAndAmortization` |
 | EPS (Diluted) | `EarningsPerShareDiluted` | `EarningsPerShareBasic` |
 | Total Assets | `Assets` | — |
-| Stockholders' Equity | `StockholdersEquity` | `StockholdersEquityAttributableToParent` |
+| Stockholders' Equity | `StockholdersEquity` | — |
 | Long-Term Debt (Non-Current) | `LongTermDebtNoncurrent` | `LongTermDebt` (see note below) |
 | Short-Term Borrowings | `ShortTermBorrowings` | `ShortTermDebt` |
-| Current Portion of LT Debt | `LongTermDebtCurrent` | `LongTermNotesPayableCurrent` |
+| Current Portion of LT Debt | `LongTermDebtCurrent` | — |
 | Finance Lease (Non-Current) | `FinanceLeaseLiabilityNoncurrent` | `CapitalLeaseObligationsNoncurrent` |
 | Finance Lease (Current) | `FinanceLeaseLiabilityCurrent` | `CapitalLeaseObligationsCurrent` |
 | Cash | `CashAndCashEquivalentsAtCarryingValue` | `CashCashEquivalentsAndShortTermInvestments` |
-| Minority Interest | `NoncontrollingInterest` | `MinorityInterest` |
-| Preferred Stock | `PreferredStockValue` | `PreferredStockRedeemableValue` |
+| Minority Interest | `MinorityInterest` | — |
+| Preferred Stock | `PreferredStockValue` | — |
 | Operating Cash Flow | `NetCashProvidedByUsedInOperatingActivities` | — |
 | Capital Expenditures | `PaymentsToAcquirePropertyPlantAndEquipment` | `PaymentsToAcquireProductiveAssets`, `PaymentsForCapitalImprovements` |
 
@@ -398,8 +420,8 @@ All tags are from the `us-gaap` taxonomy. Tags are listed in fallback order. The
 - EBIT is proxied by `OperatingIncomeLoss`. 
   - For most companies these are equivalent, but they can diverge when companies classify items such as equity-method investment income above the operating line. 
   - The UI and audit panel label this value as "Operating Income" to reflect the source accurately.
-- Some filers report `LongTermDebt` as total debt (current + non-current).
-  - If `LongTermDebt ≈ LongTermDebtNoncurrent + LongTermDebtCurrent`, it is treated as total debt and not summed with current debt to prevent duplication. 
+- `LongTermDebt` (total, current + non-current) is the fallback when `LongTermDebtNoncurrent` is absent.
+  - When the fallback fires, current portion of LT debt is zeroed out so it is not added a second time to EV.
   - A `debt_deduplicated` warning is set when this adjustment is applied.
 - If all three debt tags and both finance lease tags are absent, EV is flagged as potentially understated (`ev_debt_missing`).
 - Missing finance lease data triggers a warning for capital-intensive SIC codes where material finance leases are expected.

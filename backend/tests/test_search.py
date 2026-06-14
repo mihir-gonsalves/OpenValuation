@@ -15,11 +15,19 @@ Coverage:
   - Empty query returns empty list
   - Whitespace-only query returns empty list
   - CIK_10 normalisation (integers -> zero-padded 10-digit strings)
+  - Cooldown: failed refresh does not trigger a second network call within cooldown window
 """
 
 from __future__ import annotations
 
-from app.services.company_index import CompanyIndex, _IndexEntry, MAX_RESULTS
+import asyncio
+from unittest.mock import AsyncMock, patch
+
+import pytest
+
+from app.services.company_index import (
+    CompanyIndex, _IndexEntry, MAX_RESULTS, REFRESH_FAILURE_COOLDOWN_SECONDS,
+)
 from app.models.company import normalise_cik
 
 
@@ -204,3 +212,45 @@ def test_normalise_cik_large_value():
 def test_index_len():
     idx = _make_index()
     assert len(idx) == len(_FIXTURE_ENTRIES)
+
+
+# ---------------------------------------------------------------------------
+# Refresh failure cooldown (§3.2)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_failed_refresh_cooldown_prevents_second_attempt():
+    """
+    After a failed refresh, maybe_refresh should NOT call _fetch_and_build again
+    within REFRESH_FAILURE_COOLDOWN_SECONDS even if the index is stale.
+    """
+    import time
+    from app.services.company_index import REFRESH_INTERVAL_SECONDS
+
+    idx = CompanyIndex()
+    # Force stale index by setting last_loaded_at far enough in the past
+    # relative to time.monotonic() (not epoch-0, which can be < REFRESH_INTERVAL_SECONDS
+    # on freshly booted machines).
+    idx._last_loaded_at = time.monotonic() - REFRESH_INTERVAL_SECONDS - 1
+    idx._last_attempt_at = 0.0
+
+    call_count = 0
+
+    async def failing_fetch():
+        nonlocal call_count
+        call_count += 1
+        raise RuntimeError("SEC down")
+
+    with patch.object(idx, "_fetch_and_build", side_effect=failing_fetch):
+        # First maybe_refresh: stale + not in cooldown -> attempts fetch (fails)
+        await idx.maybe_refresh()
+        assert call_count == 1, "First call should attempt fetch"
+
+        # Second maybe_refresh: still stale, but _last_attempt_at was just set
+        # -> within cooldown, should NOT attempt again
+        await idx.maybe_refresh()
+        assert call_count == 1, (
+            "Second call within cooldown should NOT re-attempt fetch; "
+            f"_fetch_and_build was called {call_count} times"
+        )

@@ -27,8 +27,11 @@ from contextlib import asynccontextmanager
 from typing import AsyncIterator
 
 import httpx
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
+from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
+from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from app.routers import export, financials, search
 from app.services.company_index import CompanyIndex
@@ -118,6 +121,40 @@ app = FastAPI(
     docs_url="/docs",
     redoc_url="/redoc",
 )
+
+# ---------------------------------------------------------------------------
+# Exception handlers (PHASE_1_SPEC §2.1 - top-level error body contract)
+# ---------------------------------------------------------------------------
+
+
+@app.exception_handler(StarletteHTTPException)
+async def structured_http_exception_handler(
+    request: Request, exc: StarletteHTTPException
+) -> JSONResponse:
+    """Unwrap {"error", "message"} detail dicts to the top level (PHASE_1_SPEC §2.1)."""
+    if isinstance(exc.detail, dict) and "error" in exc.detail:
+        return JSONResponse(status_code=exc.status_code, content=exc.detail)
+    return JSONResponse(
+        status_code=exc.status_code,
+        content={"error": "internal_error", "message": str(exc.detail)},
+    )
+
+
+@app.exception_handler(RequestValidationError)
+async def validation_exception_handler(
+    request: Request, exc: RequestValidationError
+) -> JSONResponse:
+    """Map path-level CIK validation failures to the documented invalid_cik code."""
+    if any(tuple(e.get("loc", ()))[:2] == ("path", "cik_10") for e in exc.errors()):
+        return JSONResponse(
+            status_code=422,
+            content={
+                "error": "invalid_cik",
+                "message": "CIK must be a 10-digit zero-padded string, e.g. '0000320193'.",
+            },
+        )
+    return JSONResponse(status_code=422, content={"detail": exc.errors()})
+
 
 # ---------------------------------------------------------------------------
 # CORS middleware

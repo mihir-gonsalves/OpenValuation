@@ -32,7 +32,6 @@ from unittest.mock import AsyncMock, patch
 import pytest
 
 from app.services.xbrl import (
-    _FilingAnchor,
     _collect_filing_anchors,
     _extract_capex,
     _extract_cash,
@@ -45,14 +44,7 @@ from app.services.xbrl import (
 
 # xbrl_maps symbols imported directly from their owning module
 from app.services.xbrl_maps import (
-    _ambiguous_near,
-    _annualize,
     _build_flow_map,
-    _build_instant_map,
-    _find_annual_fact,
-    _find_prior_ytd,
-    _get_instant_result,
-    _get_ttm_value,
 )
 
 # ---------------------------------------------------------------------------
@@ -468,7 +460,9 @@ class TestExtractTtmPeriods:
 
     @staticmethod
     def _mock_price(value=Decimal("100.00")):
-        return patch("app.services.xbrl.price_svc.get_price", new_callable=AsyncMock, return_value=value)
+        async def _fake(ticker, filing_dates):
+            return {d: value for d in filing_dates}
+        return patch("app.services.xbrl.price_svc.get_prices", side_effect=_fake)
 
     async def test_crct_period_count_in_range(self, crct):
         with self._mock_price(Decimal("25.00")):
@@ -586,7 +580,8 @@ class TestExtractTtmPeriods:
     async def test_price_service_called_with_filing_dates(self, crct):
         with self._mock_price(Decimal("10.00")) as mock_get:
             periods = await extract_ttm_periods(crct, ticker="CRCT")
-        called_dates = {call.args[1] for call in mock_get.call_args_list}
+        assert mock_get.call_count == 1
+        called_dates = set(mock_get.call_args.args[1])
         expected_dates = {p.filing_date for p in periods if p.filing_date is not None}
         assert called_dates == expected_dates
 
@@ -831,8 +826,7 @@ class TestTagChainOrder:
     def test_minority_interest_chain_order(self):
         from app.services.xbrl import _INSTANT_CHAINS
         chain = _INSTANT_CHAINS["minority_interest"]
-        assert chain[0] == "NoncontrollingInterest"
-        assert chain[1] == "MinorityInterest"
+        assert chain == ["MinorityInterest"]
 
     def test_short_term_borrowings_chain_order(self):
         from app.services.xbrl import _INSTANT_CHAINS
@@ -840,22 +834,12 @@ class TestTagChainOrder:
         assert chain[0] == "ShortTermBorrowings"
         assert chain[1] == "ShortTermDebt"
 
-    def test_noncontrolling_interest_wins_over_minority_interest(self):
-        from app.services.xbrl import _resolve_instant, _INSTANT_CHAINS
-        gaap = {
-            "NoncontrollingInterest": {"units": {"USD": [{"end": "2024-12-31", "val": 50_000, "form": "10-K"}]}},
-            "MinorityInterest": {"units": {"USD": [{"end": "2024-12-31", "val": 99_000, "form": "10-K"}]}},
-        }
-        res = _resolve_instant(gaap, _INSTANT_CHAINS["minority_interest"], date(2024, 12, 31))
-        assert res.value == Decimal("50000")
-        assert not res.is_fallback
-
-    def test_minority_interest_fallback_fires(self):
+    def test_minority_interest_primary_fires(self):
         from app.services.xbrl import _resolve_instant, _INSTANT_CHAINS
         gaap = {"MinorityInterest": {"units": {"USD": [{"end": "2024-12-31", "val": 30_000, "form": "10-K"}]}}}
         res = _resolve_instant(gaap, _INSTANT_CHAINS["minority_interest"], date(2024, 12, 31))
         assert res.value == Decimal("30000")
-        assert res.is_fallback
+        assert not res.is_fallback
 
 
 class TestSharesDeduplication:

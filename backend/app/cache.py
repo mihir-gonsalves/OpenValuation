@@ -27,11 +27,13 @@ logger = logging.getLogger(__name__)
 # Internal store
 # ---------------------------------------------------------------------------
 
-MAX_CACHE_ENTRIES = 32
+MAX_CACHE_ENTRIES = 8
 """
-Upper bound on cache size. At ~5-10 MB per EDGAR companyfacts payload this
-caps in-memory use at roughly 160-320 MB, leaving headroom under Render
-free tier's 512 MB ceiling. Eviction is oldest-first by cached_at, not LRU.
+Upper bound on cache size. Parsed companyfacts dicts are ~5x their JSON size
+(a 3.6 MB AAPL payload measures ~19 MB in memory), so 8 entries bounds the
+cache at roughly 150-250 MB, leaving headroom under Render free tier's 512 MB
+after the ~150-200 MB Python/FastAPI baseline. Eviction is oldest-first by
+cached_at, not LRU.
 """
 
 _store: dict[str, CacheEntry] = {}

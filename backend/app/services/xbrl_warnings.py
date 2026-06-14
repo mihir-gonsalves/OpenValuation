@@ -8,9 +8,9 @@ Two responsibilities:
    concept extraction (TTM annualization + amendment usage). Called from
    `_resolve_flow` and `_extract_eps` in xbrl.py.
 
-2. `_dedup_warnings` - collapses repeated warning codes within a single
+2. `dedup_warnings` - collapses repeated warning codes within a single
    period into one aggregated message. Called once per period at the end of
-   `extract_ttm_periods`.
+   `extract_ttm_periods` and in the financials router.
 
 Both functions are pure and depend only on the warning model - no XBRL data
 structures, no I/O. They live here so xbrl.py can stay focused on extraction
@@ -19,7 +19,6 @@ logic.
 
 from __future__ import annotations
 
-import re
 from datetime import date
 
 from app.models.errors import Warning, WarningCode, warn
@@ -28,12 +27,11 @@ from app.models.errors import Warning, WarningCode, warn
 # Aggregation templates
 # ---------------------------------------------------------------------------
 # When the same warning code fires for several concepts in one period (e.g.
-# TTM_ANNUALIZED for Revenue, OCF, and EPS), `_dedup_warnings` collapses
+# TTM_ANNUALIZED for Revenue, OCF, and EPS), `dedup_warnings` collapses
 # them into a single message that lists every affected concept.
 #
-# To add a new aggregatable code: add an entry here. The regex below extracts
-# the concept name from the per-concept message, and dedup formats this
-# template with the collected names. No other change is needed.
+# Aggregation uses Warning.concept (a structured field) rather than parsing
+# the human-readable message, so wording changes never break deduplication.
 
 _AGGREGATABLE_TEMPLATES: dict[str, str] = {
     WarningCode.TTM_ANNUALIZED.value: (
@@ -43,13 +41,6 @@ _AGGREGATABLE_TEMPLATES: dict[str, str] = {
         "Amendment filing used for {names}."
     ),
 }
-
-# Pulls the concept name out of per-concept warning messages such as:
-#   "Prior-year YTD unavailable for Revenue; ..."
-#   "Amendment filing used for 'CommonStockSharesOutstanding' at 2024-09-28."
-# Capture group is the word(s) after "for", with optional surrounding quotes
-# stripped, ending at the first punctuation boundary.
-_CONCEPT_NAME_PATTERN = re.compile(r"\bfor ['\"]?([\w &/\-]+?)['\"]?(?:[;,.]|$)")
 
 
 # ---------------------------------------------------------------------------
@@ -85,6 +76,7 @@ def _make_flow_warnings(
             WarningCode.TTM_ANNUALIZED,
             f"Prior-year YTD unavailable for {concept_name}; "
             "TTM annualized from current YTD.",
+            concept=concept_name,
         ))
 
     if (fiscal_year_start, period_end) in amendment_keys:
@@ -92,6 +84,7 @@ def _make_flow_warnings(
             WarningCode.AMENDMENT_EXISTS,
             f"Amendment filing used for '{tag}'; "
             f"({fiscal_year_start}-{period_end}).",
+            concept=tag,
         ))
 
     return warnings
@@ -102,13 +95,13 @@ def _make_flow_warnings(
 # ---------------------------------------------------------------------------
 
 
-def _dedup_warnings(warnings: list[Warning]) -> list[Warning]:
+def dedup_warnings(warnings: list[Warning]) -> list[Warning]:
     """
     Collapse a period's warnings to one per code, preserving first-occurrence order.
 
     For aggregatable codes (TTM_ANNUALIZED, AMENDMENT_EXISTS), concept names
-    from every occurrence are merged into a single message. All other codes
-    keep their first occurrence verbatim and discard later duplicates.
+    from every occurrence are merged into a single message using Warning.concept.
+    All other codes keep their first occurrence verbatim and discard later duplicates.
 
     Example. If TTM_ANNUALIZED fires for Revenue, OCF, and EPS in one period,
     the output reads:
@@ -121,7 +114,7 @@ def _dedup_warnings(warnings: list[Warning]) -> list[Warning]:
     Note on the comparison key: `Warning.model_config` sets
     `use_enum_values=True`, so `w.code` is the underlying string (e.g.
     `"ttm_annualized"`), not the WarningCode enum member. The dict keys are
-    therefore strings, and we wrap with `WarningCode(code)` when reconstructing
+    therefore strings and is wrap with `WarningCode(code)` when reconstructing
     a Warning for the aggregated output.
     """
     first_seen: dict[str, Warning] = {}
@@ -131,16 +124,12 @@ def _dedup_warnings(warnings: list[Warning]) -> list[Warning]:
         code = w.code  # already a str - see docstring note
         if code not in first_seen:
             first_seen[code] = w
-        # For aggregatable codes, also collect the concept name for the merged message.
-        if code in _AGGREGATABLE_TEMPLATES:
-            name_match = _CONCEPT_NAME_PATTERN.search(w.message)
-            if name_match:
-                aggregated_names.setdefault(code, []).append(name_match.group(1))
+        if code in _AGGREGATABLE_TEMPLATES and w.concept is not None:
+            aggregated_names.setdefault(code, []).append(w.concept)
 
     result: list[Warning] = []
     for code, original in first_seen.items():
         if code in _AGGREGATABLE_TEMPLATES and aggregated_names.get(code):
-            # dict.fromkeys preserves order while deduplicating concept names.
             unique_names = ", ".join(dict.fromkeys(aggregated_names[code]))
             result.append(Warning(
                 code=WarningCode(code),

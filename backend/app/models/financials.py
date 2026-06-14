@@ -121,7 +121,7 @@ class ExtractedFinancials(BaseModel):
     # --- Income statement (TTM-annualized) ---
     revenue: Decimal | None = Field(
         default=None,
-        description="RevenueFromContractWithCustomerExcludingAssessedTax, Revenues, or SalesRevenueNet.",
+        description="RevenueFromContractWithCustomerExcludingAssessedTax, Revenues, SalesRevenueNet, or RevenueFromContractWithCustomerIncludingAssessedTax.",
     )
     operating_income: Decimal | None = Field(
         default=None,
@@ -153,7 +153,7 @@ class ExtractedFinancials(BaseModel):
     )
     stockholders_equity: Decimal | None = Field(
         default=None,
-        description="StockholdersEquity or StockholdersEquityAttributableToParent.",
+        description="StockholdersEquity.",
     )
     long_term_debt: Decimal | None = Field(
         default=None,
@@ -165,7 +165,7 @@ class ExtractedFinancials(BaseModel):
     )
     current_portion_lt_debt: Decimal | None = Field(
         default=None,
-        description="LongTermDebtCurrent or LongTermNotesPayableCurrent.",
+        description="LongTermDebtCurrent.",
     )
     finance_lease_current: Decimal | None = Field(
         default=None,
@@ -181,11 +181,11 @@ class ExtractedFinancials(BaseModel):
     )
     minority_interest: Decimal | None = Field(
         default=None,
-        description="NoncontrollingInterest or MinorityInterest.",
+        description="MinorityInterest.",
     )
     preferred_stock: Decimal | None = Field(
         default=None,
-        description="PreferredStockValue or PreferredStockRedeemableValue.",
+        description="PreferredStockValue.",
     )
 
     # --- Audit trail ---
@@ -316,5 +316,3 @@ class FinancialsResponse(BaseModel):
     data_as_of: datetime = Field(
         description="UTC timestamp of this response (when the computation ran)."
     )
-
-    model_config = {"use_enum_values": True}

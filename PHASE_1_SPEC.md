@@ -28,9 +28,11 @@ Local base URL `http://localhost:8000`.
 ### 1.1 `POST /api/search`
 
 Resolves a company name or ticker to up to five CIK candidates.
-**Invariant:** zero external network calls - operates only on the in-memory
-company index, giving deterministic sub-millisecond latency (rationale in
-`DESIGN.md` -> *Company Search Architecture*).
+**Invariant:** no per-query external network calls - matching runs entirely
+against the in-memory index. The only network activity on the search path is
+the index refresh, which runs at most once per 24 hours (the triggering request
+waits for it, concurrent requests wait on the same refresh). Rationale in
+`DESIGN.md` -> *Company Search Architecture*.
 
 **Request** - `{ "query": "Apple" }`, `query` required, 1–200 chars, stripped.
 
@@ -119,7 +121,7 @@ regex `^\d{10}$`. `periods` is empty in Phase 1, up to 12 entries from Phase 2 o
 
 **`TTMPeriod.warnings`** is the **union** of extraction warnings (Phase 2) and
 per-multiple warnings (Phase 3) - never a subset of either. The required merge is
-in §9.2.
+in §6.2.
 
 **`cached_at`** = when EDGAR data was last fetched. **`data_as_of`** = when this
 response was computed.
@@ -243,7 +245,7 @@ Module-level dict in `app/cache.py`. Full design rationale (why CIK, why not Red
 cold-start tradeoff) is in `DESIGN.md` -> *Caching Strategy*, the contract is:
 
 - **Key:** `CIK_10`. **TTL:** 24h (`CACHE_TTL_SECONDS = 86400`). **Eviction:** lazy
-  on read, oldest-first at `MAX_CACHE_ENTRIES = 32` (sized for Render's 512 MB).
+  on read, oldest-first at `MAX_CACHE_ENTRIES = 8` (parsed dicts are ~5× their JSON size, see `app/cache.py`).
 - **Stores raw EDGAR payloads**, not computed results - so Phase 2/3 logic always
   re-runs from cache and never needs invalidation when computation changes.
 - Cleared on every restart/cold start. No explicit invalidation endpoint.
@@ -320,6 +322,14 @@ model `vars()` includes internal state keys, and `model_dump()` returns plain di
 that lose the `.warnings` attribute. Listing the seven fields is explicit, fast,
 and makes the schema contract visible. Omitting the merge silently drops all Phase 3
 warnings (`denominator_near_zero`, `negative_book_value`, ...) from the API and Excel.
+
+**Warning deduplication.** The router now applies `_dedup_warnings` to the merged
+union before building `TTMPeriod.warnings`. This collapses repeated codes - most
+importantly `ev_debt_missing`, which Phase 3 should attach to each EV-based multiple
+(`ev_ebitda`, `ev_ebit`, `ev_revenue`) so it reaches the response. Without dedup,
+that produces three identical rows in the UI/Excel. The dedup at the router boundary
+collapses them automatically, so Phase 3 implementers can attach the warning to each
+affected multiple without worrying about triplication.
 
 ### 6.3 Phase 4 - Excel export (owed)
 

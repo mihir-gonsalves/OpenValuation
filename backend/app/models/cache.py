@@ -52,7 +52,7 @@ class EDGARPayload(BaseModel):
     company_meta: CompanyMeta
     """
     Parsed company metadata derived from data.sec.gov/submissions/CIK{CIK_10}.json 
-    at fetch time. Stored here so we can cheaply return it on cache hits without re-parsing.
+    at fetch time. Stored here so it can be cheaply returned on cache hits without re-parsing.
     """
 
 

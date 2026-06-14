@@ -61,7 +61,7 @@ https://www.sec.gov/files/company_tickers.json
 
 - The company index is loaded from the SEC `company_tickers.json` dataset at application startup and stored in memory
 - The index is refreshed lazily on the search path at most once every 24 hours (`CompanyIndex.maybe_refresh`), there is no background task
-- All search queries operate exclusively on the in-memory dataset. No external network calls are made during search, ensuring deterministic latency
+- Search queries never call EDGAR or any per-query external service, matching runs entirely against the in-memory index
 
 ### Search Algorithm
 
@@ -76,8 +76,7 @@ https://www.sec.gov/files/company_tickers.json
 
 ### Constraints
 
-- No external network calls during search
-- Deterministic latency
+- Search never blocks on a network call — worst-case it returns stale results from the last successful load
 - O(n) scan over ~10k entries
 
 ### Separation of Concerns
@@ -135,14 +134,21 @@ EDGAR's `companyfacts` payload can be 5–10 MB per company. Re-fetching it on e
 
 ```python
 _cache: dict[str, CacheEntry] = {}
-CACHE_TTL_HOURS = 24
+CACHE_TTL_SECONDS = 24 * 3600
+MAX_CACHE_ENTRIES = 8  # parsed dicts are ~5× their JSON size, caps memory use
 
-def get(cik_10: str) -> FinancialData | None:
+def get(cik_10: str) -> CacheEntry | None:
     entry = _cache.get(cik_10)
-    if entry and (datetime.utcnow() - entry.cached_at).total_seconds() < CACHE_TTL_HOURS * 3600:
-        return entry.data
+    if entry and (datetime.now(timezone.utc) - entry.cached_at).total_seconds() < CACHE_TTL_SECONDS:
+        return entry
     return None
 ```
+
+The `MAX_CACHE_ENTRIES = 8` cap bounds memory use. When the limit is reached, the oldest entry (by `cached_at`) is evicted before the new one is inserted.
+
+The cache stores raw **EDGAR payloads** (`companyfacts` + `CompanyMeta`), not computed results.
+This means Phase 2/3 logic always re-runs from the cached payload and never needs cache
+invalidation when computation changes. See `models/cache.py` for the exact `CacheEntry` shape.
 
 **Why CIK, not ticker?** 
 
@@ -172,9 +178,9 @@ EDGAR filings are typically submitted after 4:00 PM ET. The filing day's own clo
 
 Edge case: filings submitted before 9:30 AM ET could technically use the same trading day's close. This is not handled, the tool always uses the next trading day. This introduces a small systematic timing bias for filings submitted before market open or intra-day. Impact is minimal but consistent.
 
-**Why adjusted close?** 
+**Why split-adjusted close?** 
 
-Stock splits distort raw prices over time. `yfinance`'s `history(auto_adjust=True)` returns split-adjusted close, making prices comparable across periods.
+Stock splits distort raw prices over time. `yfinance.download(auto_adjust=False)` returns the `Close` column, which is split-adjusted only (not dividend-adjusted), making prices comparable across periods without distorting the level by dividend reinvestment assumptions.
 
 **Why a 14-day window?** 
 
@@ -183,7 +189,7 @@ The US market can be closed for 4–5 consecutive calendar days around Christmas
 **Shares outstanding:**
 
 Drawn from the filing's XBRL data (`CommonStockSharesOutstanding`), not from the price service.  
-This ensures the share count matches the exact period being valued.
+This ensures the share count matches the exact period being valued. When a filer stops tagging (or never tags) GAAP shares, the DEI tag `EntityCommonStockSharesOutstanding` is used as a fallback. Because the DEI tag's `end` is the report date rather than the period end, it is matched by the anchor filing's accession number rather than by date.
 
 **Shares consistency:** 
 
@@ -251,6 +257,7 @@ REVENUE_TAGS = [
     "RevenueFromContractWithCustomerExcludingAssessedTax",
     "Revenues",
     "SalesRevenueNet",
+    "RevenueFromContractWithCustomerIncludingAssessedTax",
 ]
 ```
 
@@ -271,10 +278,12 @@ A structured warning `amendment_exists` is attached to the affected period to in
 
 Tradeoff: reproducibility and consistency are prioritized over post-hoc accuracy.
 
+**Limitation:** the TTM anchor selection (which quarterly filing anchors the trailing twelve months) also excludes amendment-only filings. If a company's most recent quarter was filed exclusively as a `10-Q/A` with no original `10-Q`, that quarter may be skipped and the most recent period will be one quarter older than expected.
+
 ### Unit Validation
 
 Only facts with `unitRef: USD` are accepted. Non-USD facts are rejected at extraction.  
-USD-denominated facts reported with scaling (e.g., thousands or millions) are normalized when scale metadata is present. If scale cannot be reliably determined, the fact is rejected to prevent magnitude errors.
+All monetary values are validated against their `unitRef`, non-USD facts are rejected. Scale normalization is not required: the EDGAR companyfacts API reports values in full (unscaled) units.
 
 
 
@@ -299,14 +308,9 @@ If *all* financial debt tags are absent, is flagged as potentially understated w
 
 ### Long-Term Debt Deduplication
 
-`LongTermDebtNoncurrent` is treated as the primary representation of non-current debt.
+`LongTermDebtNoncurrent` is the primary tag for non-current long-term debt. `LongTermDebt` (which covers both current and non-current maturities) is the fallback when `LongTermDebtNoncurrent` is absent.
 
-If `LongTermDebt` is present, the following logic is applied:
-
-- If `LongTermDebt ≈ LongTermDebtNoncurrent + LongTermDebtCurrent` (within tolerance), it is treated as total debt and not added separately
-- Otherwise, it is treated as non-current debt only
-
-When this reconciliation occurs, a `debt_deduplicated` warning is attached.
+When the fallback fires, the current portion of long-term debt is zeroed out so it is not added a second time to EV. A `debt_deduplicated` warning is attached to indicate this zeroing occurred.
 
 This prevents double-counting current maturities in EV.
 
@@ -390,7 +394,7 @@ XBRL reporting of D&A is inconsistent:
 - Some filers split depreciation and amortization into separate tags
 - Some omit amortization entirely from standard tags
 
-No reconstruction is attempted beyond the defined tag set. This can understate EBITDA and inflate EV/EBITDA.
+No reconstruction is attempted beyond the defined tag set. This can understate EBITDA and inflate EV/EBITDA. When D&A is absent, EV/EBITDA is reported as N/A rather than as a proxy for EV/EBIT.
 
 
 
@@ -424,8 +428,10 @@ XBRL facts are classified by comparing start and end date durations. YTD facts s
 If prior-year YTD is unavailable (e.g., company recently went public, or changed fiscal year):
 
 ```
-TTM ≈ Most Recent Annual + (Current YTD / quarters in YTD) × 4
+TTM ≈ Current YTD / quarters elapsed × 4
 ```
+
+The prior-year bridge requires both the prior fiscal year's annual fact and the prior-year YTD. If either is missing, the current YTD is annualized directly. The most recent annual figure is not added, since that would double-count a full year.
 
 Labeled with `ttm_annualized` warning and the message: *"Prior-year YTD unavailable, annualized from current YTD. TTM may be less precise."* 
 
@@ -463,7 +469,7 @@ Makes the data source traceable without requiring the user to inspect raw filing
 | Non-USD unit | Fact rejected at extraction |
 | Ambiguous fact (multiple contexts) | Deterministic rule applied, if ambiguous `None` + `ambiguous_fact` applied |
 | Period mismatch | Fact rejected, `period_mismatch` warning unused (kept for completeness) - validated with exact-key matching |
-| EDGAR 429 | Retry once with exponential backoff, `503` to client if it fails |
+| EDGAR 429 | Retry once with fixed 2s backoff, `503` to client if it fails |
 | EDGAR timeout (>15s) | `503` with user-readable message |
 
 

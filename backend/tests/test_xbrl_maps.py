@@ -23,11 +23,8 @@ TestUnitFiltering        end-to-end USD-only guarantee # USD-only filtering
 
 from __future__ import annotations
 
-import json
 from datetime import date
 from decimal import Decimal
-from pathlib import Path
-from unittest.mock import AsyncMock, patch
 
 import pytest
 
