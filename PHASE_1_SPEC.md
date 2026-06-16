@@ -205,6 +205,7 @@ these it actually emits vs. reserves, it does not redefine them.
 | | `ambiguous_fact` | conflicting non-amendment values after dedup, value is None |
 | Multiples | `denominator_near_zero` | `abs(denominator) < 0.01`, multiple is N/A |
 | | `negative_book_value` | `StockholdersEquity < 0`, P/B is N/A |
+| | `negative_fcf` | `OperatingCashFlow − CapEx < 0`, P/FCF is N/A |
 | Price | `price_unavailable` | yfinance returned no price for this period/ticker |
 
 ### 2.5 `N/A` semantics
@@ -212,7 +213,10 @@ these it actually emits vs. reserves, it does not redefine them.
 `null` in a multiple's `value` means data was unavailable or a guard fired. It is
 categorically distinct from zero or a valid negative. The precise guard rules
 (negative book value, near-zero denominator, negative FCF) are owned by
-`README.md` -> *Results Display* and `DESIGN.md` -> *Multiples*.
+`README.md` -> *Results Display* and `DESIGN.md` -> *Multiples*. The guards that
+fire on present data (`negative_book_value`, `negative_fcf`, `denominator_near_zero`)
+carry a warning, a `null` caused by a missing operand is silent (see
+`PHASE_3_SPEC.md` §2.2).
 
 
 
@@ -293,15 +297,14 @@ dispatch). The Phase 1 stub assumed the opposite (sync `_build_response` + price
 the route handler), that arrangement is superseded. See `PHASE_2_SPEC.md` §1 and
 the `app/routers/financials.py` docstring. No extension point still owed here.
 
-### 6.2 Phase 3 - multiples engine + warning merge (owed)
+### 6.2 Phase 3 - multiples engine + warning merge (settled)
 
-- Implement `multiples.compute_all(f: ExtractedFinancials) -> tuple[MultipleSet,
-  EVComponents]` and replace the `NotImplementedError` in the seven pure
-  calculators.
-- `_build_response` already calls `compute_all` after extraction, with graceful
-  degradation: if it raises `NotImplementedError` (Phase not ready), every period
-  is built with empty `MultipleSet()` / `EVComponents()` and **extraction data is
-  never discarded or re-fetched**.
+- `multiples.compute_all(f: ExtractedFinancials) -> tuple[MultipleSet, EVComponents]`
+  is implemented with the seven pure calculators.
+- `_build_response` calls `compute_all` per period inside a `try/except Exception`:
+  any failure is logged via `logger.exception` and that period falls back to an
+  empty `MultipleSet()` / `EVComponents()` while **extraction data is never discarded
+  or re-fetched**.
 
 **Required warning merge.** Each `TTMPeriod.warnings` must be `ef.warnings` plus
 every per-multiple warning. The implemented pattern iterates the seven
@@ -323,7 +326,7 @@ that lose the `.warnings` attribute. Listing the seven fields is explicit, fast,
 and makes the schema contract visible. Omitting the merge silently drops all Phase 3
 warnings (`denominator_near_zero`, `negative_book_value`, ...) from the API and Excel.
 
-**Warning deduplication.** The router now applies `_dedup_warnings` to the merged
+**Warning deduplication.** The router now applies `dedup_warnings` to the merged
 union before building `TTMPeriod.warnings`. This collapses repeated codes - most
 importantly `ev_debt_missing`, which Phase 3 should attach to each EV-based multiple
 (`ev_ebitda`, `ev_ebit`, `ev_revenue`) so it reaches the response. Without dedup,
@@ -352,7 +355,7 @@ backend/app/
     ├── company_index.py   load, search, background refresh
     ├── edgar.py           fetch_companyfacts / fetch_metadata, _resolve_client, 429 retry
     ├── price.py           get_price, _fetch_price_sync, _normalise_ticker
-    ├── multiples.py       compute_all + 7 pure fns (NotImplementedError stubs -> Phase 3)
+    ├── multiples.py       compute_all + 7 pure fns (implemented in Phase 3)
     └── workbook.py        build_workbook (stub -> Phase 4)
 ```
 

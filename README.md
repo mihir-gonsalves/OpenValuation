@@ -139,7 +139,7 @@ FCF = Operating Cash Flow
     − Capital Expenditures
 ```
 
-If FCF is negative or required tags are missing, P/FCF is shown as `N/A` with an explanatory note.
+If FCF is negative, P/FCF is shown as `N/A` with a `negative_fcf` warning. If required tags are missing, P/FCF is a silent `N/A` (the missing data is already surfaced upstream).
 
 ### 5. TTM Presentation
 
@@ -159,7 +159,7 @@ All periods are displayed in a single table. A "data as of" timestamp indicates 
 - Zero/near-zero denominators (|x| < 0.01) -> `N/A` with `denominator_near_zero`
 - Negative denominators are allowed and produce negative multiples, with two
   exceptions: 
-    - Negative FCF -> `N/A`
+    - Negative FCF -> P/FCF is `N/A` with `negative_fcf`
     - Negative Stockholders' Equity -> P/B is `N/A` with `negative_book_value`
     (a negative P/B is not analytically interpretable the way a negative P/E is)
 
@@ -318,9 +318,9 @@ OpenValuation/
 │   │   │   ├── xbrl_maps.py         XBRL data transformation
 │   │   │   └── xbrl_warnings.py     XBRL warning helpers
 │   │   ├── models/
-│   │   │   ├── company.py           Pydantic models: CompanyResult, FilingPeriod
-│   │   │   ├── errors.py            Pydantic models: Errors, Warnings
-│   │   │   ├── financials.py        Pydantic models: ExtractedFinancials, MultipleSet
+│   │   │   ├── company.py           Pydantic models: CompanyMeta, CompanyCandidate
+│   │   │   ├── errors.py            Pydantic models: Warning, APIError + codes
+│   │   │   ├── financials.py        Pydantic models: ExtractedFinancials, MultipleSet, TTMPeriod
 │   │   │   └── cache.py             CacheEntry model + TTL logic
 │   │   ├── cache.py                 In-memory store (module-level dict)
 │   │   └── user_agent.py            EDGAR User Agent Setup     
@@ -334,6 +334,7 @@ OpenValuation/
 │   │   ├── test_xbrl_extended.py
 │   │   ├── test_xbrl_aapl_msft.py
 │   │   ├── test_api_errors.py
+│   │   ├── test_multiples.py
 │   │   ├── test_financials_route.py
 │   │   └── fixtures/
 │   │       ├── aapl_CIK0000320193.json

@@ -16,10 +16,11 @@ Flow:
 
 Phase 2: _build_response is async, it awaits xbrl.extract_ttm_periods()
          (which internally runs price fetches concurrently).
-         TTMPeriods are returned with empty MultipleSet / EVComponents.
          Phase 2 extraction data is never discarded.
 
-Phase 3: multiples.compute_all() raises NotImplementedError (stub until Phase 3).
+Phase 3: multiples.compute_all() populates each TTMPeriod's MultipleSet /
+         EVComponents. Any per-period exception is caught and logged, that
+         period's multiples are empty while extraction data is preserved.
 """
 
 from __future__ import annotations
@@ -32,7 +33,7 @@ from fastapi import APIRouter, Path, Request
 import app.cache as cache_store
 from app.models.company import CompanyMeta
 from app.models.financials import EVComponents, FinancialsResponse, MultipleSet, TTMPeriod
-from app.services import edgar, xbrl
+from app.services import edgar, multiples, xbrl
 from app.services.xbrl_warnings import dedup_warnings
 
 logger = logging.getLogger(__name__)
@@ -136,10 +137,7 @@ async def _build_response(
         from inside extract_ttm_periods itself.
 
     Multiples (Phase 3):
-      - ImportError or NotImplementedError on the first period -> all remaining
-        periods are built with empty MultipleSet / EVComponents. Extraction
-        data is never discarded or re-fetched.
-      - Any other exception per period -> logged, that period's multiples are
+      - Any exception per period -> logged, that period's multiples are
         empty, extraction data is preserved.
     """
     # --- Phase 2: XBRL extraction + concurrent price fetches ---
@@ -150,13 +148,6 @@ async def _build_response(
     )
 
     # --- Phase 3: multiples computation ---
-    multiples_ready = True
-    try:
-        from app.services import multiples
-    except ImportError:
-        multiples_ready = False
-        logger.debug("multiples service not yet available (Phase 3).")
-
     periods: list[TTMPeriod] = []
     for ef in extracted_periods:
         if ef.period_end is None:
@@ -165,21 +156,16 @@ async def _build_response(
 
         multiples_set = MultipleSet()
         ev_components = EVComponents()
+        try:
+            multiples_set, ev_components = multiples.compute_all(ef)
+        except Exception:
+            logger.exception(
+                "multiples.compute_all error for CIK %s period %s.",
+                company_meta.cik_10,
+                ef.period_end,
+            )
 
-        if multiples_ready:
-            try:
-                multiples_set, ev_components = multiples.compute_all(ef)
-            except NotImplementedError:
-                multiples_ready = False
-                logger.debug("multiples.compute_all not yet implemented (Phase 3).")
-            except Exception:
-                logger.exception(
-                    "multiples.compute_all error for CIK %s period %s.",
-                    company_meta.cik_10,
-                    ef.period_end,
-                )
-
-        # Collect per-multiple warnings from Phase 3 (empty list in Phase 2).
+        # Collect per-multiple warnings from Phase 3.
         # Iterate the seven known MultipleSet fields explicitly - using vars() or
         # model_dump() on a Pydantic v2 model includes internal state keys and
         # returns plain dicts respectively, both of which break .warnings access.

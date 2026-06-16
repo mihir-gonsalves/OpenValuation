@@ -259,6 +259,7 @@ def test_no_orphan_warning_codes():
         "ev_debt_missing",        # raised in Phase 3 (multiples.py)
         "denominator_near_zero",  # raised in Phase 3 (multiples.py)
         "negative_book_value",    # raised in Phase 3 (multiples.py)
+        "negative_fcf",           # raised in Phase 3 (multiples.py)
         "period_mismatch",        # deprecated by anchor model (see errors.py docstring)
     }
 

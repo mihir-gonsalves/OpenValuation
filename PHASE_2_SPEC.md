@@ -197,12 +197,12 @@ restated here. What's Phase-2-specific is *which codes this phase actually emits
 `ambiguous_fact`.
 
 **Defined but reserved for Phase 3** (multiples engine):
-`ev_debt_missing`, `denominator_near_zero`, `negative_book_value`.
+`ev_debt_missing`, `denominator_near_zero`, `negative_book_value`, `negative_fcf`.
 
 **Defined but never raised** (see §3.3): `period_mismatch`.
 
 Per-code dedup is applied once per period at the end of `extract_ttm_periods`
-(`_dedup_warnings`). `ttm_annualized` and `amendment_exists` aggregate their
+(`dedup_warnings`). `ttm_annualized` and `amendment_exists` aggregate their
 affected concept names into one message. Mechanics are in `xbrl_warnings.py`.
 
 

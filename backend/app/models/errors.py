@@ -95,6 +95,11 @@ class WarningCode(str, Enum):
     """Stockholders' equity is negative. P/B returned as N/A because a
     negative P/B ratio is not analytically interpretable."""
 
+    NEGATIVE_FCF = "negative_fcf"
+    """Free cash flow (Operating Cash Flow - CapEx) is negative. P/FCF returned
+    as N/A because a negative P/FCF is not analytically interpretable, and
+    professional databases suppress it rather than show a negative multiple."""
+
     # --- Price data ---
     PRICE_UNAVAILABLE = "price_unavailable"
     """Adjusted close price could not be retrieved from yfinance for this
@@ -154,7 +159,7 @@ class Warning(BaseModel):
 
     concept: str | None = None
     """Concept or tag name for aggregatable codes (TTM_ANNUALIZED, AMENDMENT_EXISTS).
-    Used internally by _dedup_warnings for aggregation, not displayed directly."""
+    Used internally by dedup_warnings for aggregation, not displayed directly."""
 
     model_config = {"use_enum_values": True}
 
@@ -175,10 +180,11 @@ class APIError(BaseModel):
 # ---------------------------------------------------------------------------
 # warn() convenience constructor
 # ---------------------------------------------------------------------------
-# Pre-built WARN_* constants are intentionally absent. Phase 2 constructs
-# warnings inline via warn(code, message) with dynamic per-period context
-# (tag name, fiscal year, etc.). Phase 3 may reintroduce constants for
-# period-static messages (e.g. NEGATIVE_BOOK_VALUE) once they are needed.
+# Pre-built WARN_* constants are intentionally absent. Both Phase 2 and Phase 3
+# construct warnings inline via warn(code, message): Phase 2 needs dynamic
+# per-period context (tag name, fiscal year), and Phase 3's four codes
+# (NEGATIVE_BOOK_VALUE, NEGATIVE_FCF, EV_DEBT_MISSING, DENOMINATOR_NEAR_ZERO)
+# read cleanly as single inline calls. No constants are needed.
 # ---------------------------------------------------------------------------
 
 

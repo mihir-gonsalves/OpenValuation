@@ -1,7 +1,7 @@
 # OpenValuation: Project Status
 
-**Last Updated:** 2026-06-09  
-**Current Phase:** Phase 3 - Multiples Engine (Phase 2 complete, under review).
+**Last Updated:** 2026-06-14  
+**Current Phase:** Phase 4 - Frontend and Excel (Phase 3 complete).
 
 ## Overview
 
@@ -12,7 +12,7 @@ Each filing uses the split-adjusted close on the next trading day after submissi
 **Stack**
 
 * Frontend: React 18 + Vite -> Vercel
-* Backend: FastAPI (Python 3.11) -> Render
+* Backend: FastAPI (Python 3.10+) -> Render
 * Data: SEC EDGAR + `yfinance`
 * Excel: `openpyxl`
 
@@ -145,7 +145,7 @@ EBITDA limitation:
 | EV/Revenue | EV ÷ Revenue          | Zero guard               |
 | P/S        | Market Cap ÷ Revenue  |                          |
 | P/B        | Market Cap ÷ Equity   | Near-zero guard, negative equity returns N/A with `negative_book_value` |
-| P/FCF      | Market Cap ÷ FCF      | Negative FCF returns N/A |
+| P/FCF      | Market Cap ÷ FCF      | Near-zero guard, negative FCF returns N/A with `negative_fcf` |
 
 Rules:
 
@@ -250,7 +250,7 @@ Testing:
 
 ### Phase 3: Multiples Engine
 
-Status: Not started
+Status: Complete
 
 * Seven pure calculation functions
 * EV computation including leases
@@ -258,6 +258,8 @@ Status: Not started
 * Negative handling
 * Finance lease warning logic
 * Full test coverage
+
+See `PHASE_3_SPEC.md` for the decision record.
 
 ### Phase 4: Frontend and Excel
 

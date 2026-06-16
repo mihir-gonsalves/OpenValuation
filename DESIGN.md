@@ -76,7 +76,7 @@ https://www.sec.gov/files/company_tickers.json
 
 ### Constraints
 
-- Search never blocks on a network call — worst-case it returns stale results from the last successful load
+- Search never blocks on a network call - worst-case it returns stale results from the last successful load
 - O(n) scan over ~10k entries
 
 ### Separation of Concerns
@@ -113,7 +113,7 @@ Three sheets are generated:
   - Concept name
   - XBRL tag used
   - Fallback status (primary or fallback)
-  - Unit (USD)
+  - Unit (USD, USD/shares, or shares - taken from the matched fact's unitRef)
   - Entity context (consolidated or segment)
   - Period end date
 
@@ -304,7 +304,7 @@ EV = Market Cap
 
 Each component maps to primary and fallback XBRL tags. Missing components are treated as zero. While this often reflects true zero balances, incomplete XBRL tagging can result in understated enterprise value.
 
-If *all* financial debt tags are absent, is flagged as potentially understated with `ev_debt_missing` tag that highlights: *"All financial debt tags were absent. EV may be understated."*
+If *all* financial debt and finance-lease tags are absent (and market cap is computable), EV is flagged as potentially understated with the `ev_debt_missing` warning: *"All financial debt and finance lease tags are absent, enterprise value may be understated."* The message text matches the constant raised in `multiples.compute_enterprise_value`.
 
 ### Long-Term Debt Deduplication
 
@@ -371,7 +371,7 @@ All multiples are computed from reported GAAP figures. No non-GAAP adjustments.
 - `N/A` means data is unavailable, not that the result is negative - these are categorically different.
 - **Negative results** are displayed as negative numbers (negative P/E for loss-making companies, negative EV for net-cash companies, exception for FCF). 
 - **Negative book value:** if `StockholdersEquity < 0`, P/B returns `N/A` with a `negative_book_value` warning. The ratio is not analytically interpretable when equity is negative, which is a distinct condition from a near-zero denominator and must be checked explicitly before the near-zero guard runs.
-- **Negative FCF** returns `N/A` with an explanatory note. Negative FCF is ambiguous and not reported by professional databases as a negative multiple.
+- **Negative FCF:** if `OperatingCashFlow − CapEx < 0`, P/FCF returns `N/A` with a `negative_fcf` warning. Negative FCF is ambiguous and not reported by professional databases as a negative multiple. Like negative book value, it is a distinct condition checked before the near-zero guard, and it fires on present data so it carries a warning.
 - **Near-zero denominators:** if `abs(denominator) < 0.01`, return `N/A` with `denominator_near_zero`. This avoids unstable or non-meaningful multiples from numerically insignificant denominators.
 - **P/E fallback:** if diluted EPS is absent, falls back to basic EPS, labeled "P/E (basic)" with `fallback_eps_basic` warning.
 - **CapEx Tag Selection:**
@@ -433,7 +433,7 @@ TTM ≈ Current YTD / quarters elapsed × 4
 
 The prior-year bridge requires both the prior fiscal year's annual fact and the prior-year YTD. If either is missing, the current YTD is annualized directly. The most recent annual figure is not added, since that would double-count a full year.
 
-Labeled with `ttm_annualized` warning and the message: *"Prior-year YTD unavailable, annualized from current YTD. TTM may be less precise."* 
+Labeled with `ttm_annualized` warning, e.g. *"Prior-year data unavailable for Revenue and EPS, TTM annualized from current YTD."*
 
 If a company changed fiscal year and the prior-year YTD stub does not exist, the bridge degrades to this fallback rather than producing an incorrect result.
 
@@ -463,9 +463,9 @@ Makes the data source traceable without requiring the user to inspect raw filing
 |---|---|
 | XBRL tag missing | `None` returned, UI shows `N/A` with tooltip explaining the tag was not found |
 | Negative result (valid) | Displayed as negative with note |
-| Negative FCF | Displayed as `N/A` with explanatory note |
-| Invalid price | Structured `price_unavailable` error applied |
-| All debt tags absent | EV computed with debt=0, `ev_debt_missing` warning applied |
+| Negative FCF | Displayed as `N/A` with `negative_fcf` warning |
+| Invalid price | `price_unavailable` warning applied, price-dependent multiples N/A |
+| All debt/lease tags absent (market cap computable) | EV computed with those components=0, `ev_debt_missing` warning applied |
 | Non-USD unit | Fact rejected at extraction |
 | Ambiguous fact (multiple contexts) | Deterministic rule applied, if ambiguous `None` + `ambiguous_fact` applied |
 | Period mismatch | Fact rejected, `period_mismatch` warning unused (kept for completeness) - validated with exact-key matching |
