@@ -1,0 +1,105 @@
+@import 'tailwindcss';
+@import 'tw-animate-css';
+
+:root {
+  --radius: 0.3125rem;
+
+  /* Surfaces - ivory paper, near black ink */
+  --background: oklch(0.992 0.004 92);
+  --foreground: oklch(0.24 0.012 65);
+
+  --popover: oklch(1 0 0);
+  --popover-foreground: oklch(0.24 0.012 65);
+
+  /* Accent - indigo ink */
+  --primary: oklch(0.4 0.088 258);
+  --primary-foreground: oklch(0.985 0.005 258);
+
+  /* Subtle surfaces */
+  --secondary: oklch(0.965 0.005 90);
+  --muted: oklch(0.965 0.005 90);
+  --muted-foreground: oklch(0.5 0.01 70);
+
+  /* Faint indigo tint for hover */
+  --accent: oklch(0.945 0.014 258);
+  --accent-foreground: oklch(0.34 0.05 258);
+
+  /* Table row highlight - faint indigo wash */
+  --current-row: oklch(0.967 0.013 258);
+
+  /* Negatives & errors - oxblood red */
+  --destructive: oklch(0.5 0.14 26);
+
+  /* Data-quality warning - amber */
+  --warning: oklch(0.78 0.13 78);
+  --warning-foreground: oklch(0.4 0.07 70);
+  --warning-surface: oklch(0.957 0.035 85);
+
+  /* Lines & focus */
+  --border: oklch(0.9 0.005 80);
+  --ring: oklch(0.4 0.088 258);
+
+  /* Sparkline trend stroke - muted indigo ink */
+  --trend: oklch(0.5 0.055 258);
+
+  --font-display: 'Plus Jakarta Sans';
+  --font-sans: 'Hanken Grotesk';
+}
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-current-row: var(--current-row);
+  --color-destructive: var(--destructive);
+  --color-warning: var(--warning);
+  --color-warning-foreground: var(--warning-foreground);
+  --color-warning-surface: var(--warning-surface);
+  --color-border: var(--border);
+  --color-ring: var(--ring);
+  --color-trend: var(--trend);
+
+  --font-display: var(--font-display);
+  --font-sans: var(--font-sans);
+
+  --radius-sm: calc(var(--radius) - 2px);
+  --radius-md: var(--radius);
+  --radius-lg: calc(var(--radius) + 2px);
+}
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+
+  body {
+    @apply bg-background text-foreground font-sans antialiased;
+    text-rendering: optimizeLegibility;
+  }
+
+  .tnum {
+    font-variant-numeric: tabular-nums;
+    font-feature-settings: 'tnum';
+  }
+}
+
+@layer components {
+
+  /* Small uppercase section label */
+  .eyebrow {
+    @apply text-muted-foreground text-[0.6875rem] font-medium tracking-[0.14em] uppercase;
+  }
+
+  /* Engraved double rule under the masthead */
+  .rule-engraved {
+    border-top: 1px solid var(--border);
+  }
+}
