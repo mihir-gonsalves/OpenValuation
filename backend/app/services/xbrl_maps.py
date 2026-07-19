@@ -240,7 +240,7 @@ def _build_flow_map(facts: list[dict]) -> _FlowEntry:
     grouped: dict[tuple[date, date], list[dict]] = defaultdict(list)
     for f in facts:
         if "start" not in f:
-            continue  # instant fact - not our concern
+            continue  # instant fact - not a concern
         key = (date.fromisoformat(f["start"]), date.fromisoformat(f["end"]))
         grouped[key].append(f)
 
@@ -289,7 +289,7 @@ def _build_instant_map(facts: list[dict]) -> _InstantEntry:
     grouped: dict[date, list[dict]] = defaultdict(list)
     for f in facts:
         if "start" in f:
-            continue  # flow fact - not our concern
+            continue  # flow fact - not a concern
         key = date.fromisoformat(f["end"])
         grouped[key].append(f)
 

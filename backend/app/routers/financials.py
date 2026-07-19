@@ -44,7 +44,7 @@ router = APIRouter()
 # Listed explicitly: vars() includes Pydantic internal keys, model_dump()
 # returns plain dicts that lose the .warnings attribute.
 _MULTIPLE_FIELDS = (
-    "pe", "ev_ebitda", "ev_ebit", "ev_revenue", "ps", "pb", "pfcf",
+    "ev_revenue", "ev_ebitda", "ev_ebit", "pe", "pfcf", "ps", "pb",
 )
 
 
@@ -69,6 +69,15 @@ async def get_financials(
 ) -> FinancialsResponse:
     """
     Main data endpoint. Returns valuation multiples for the given CIK.
+    """
+    return await resolve_financials(request, cik_10)
+
+
+async def resolve_financials(request: Request, cik_10: str) -> FinancialsResponse:
+    """
+    Cache-or-fetch orchestration shared by the financials and export endpoints:
+    return the cached FinancialsResponse for `cik_10`, otherwise fetch from EDGAR
+    (writing the cache) and build it.
     """
     # -------------------------------------------------------------------------
     # Step 2 - Cache lookup

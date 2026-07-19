@@ -163,7 +163,7 @@ export function Learn() {
             Some numbers carry a small note (hover to read it). These flag
             things worth knowing - for instance a value estimated from partial
             data, or a figure that's negative or unusually small so the multiple
-            may be misleading. They aren't errors, they're just honest about the
+            may be misleading. They aren't errors, they're just honesty about the
             data. A dash simply means the company didn't report what's needed to
             compute that value.
           </p>

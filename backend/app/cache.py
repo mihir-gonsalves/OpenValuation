@@ -9,7 +9,7 @@ Design:
 - TTL: 24 hours (CACHE_TTL_SECONDS from models/cache.py).
 - No background expiry thread. Stale entries are evicted lazily on read.
 - Not thread-safe for concurrent writes on the same key, but FastAPI's async
-  event loop runs in a single thread, so this is safe for our use case.
+  event loop runs in a single thread, so this is safe for now.
 """
 
 from __future__ import annotations

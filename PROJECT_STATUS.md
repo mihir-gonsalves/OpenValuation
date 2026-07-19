@@ -11,7 +11,7 @@ Each filing uses the split-adjusted close on the next trading day after submissi
 
 **Stack**
 
-* Frontend: React 18 + Vite -> Vercel
+* Frontend: React 19 + Vite -> Vercel
 * Backend: FastAPI (Python 3.10+) -> Render
 * Data: SEC EDGAR + `yfinance`
 * Excel: `openpyxl`
@@ -263,7 +263,7 @@ See `PHASE_3_SPEC.md` for the decision record.
 
 ### Phase 4: Frontend and Excel
 
-Status: Not started
+Status: Complete
 
 Frontend:
 

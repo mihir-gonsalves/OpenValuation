@@ -60,6 +60,13 @@ export function formatCompactNumber(value: number | null | undefined): string {
   return value.toLocaleString('en-US', { notation: 'compact', maximumFractionDigits: 2 })
 }
 
+/** Per-share currency values (EPS): -$1.23, $6.60. */
+export function formatPerShareCurrency(value: number | null | undefined): string {
+  if (value === null || value === undefined || Number.isNaN(value)) return NA
+  const sign = value < 0 ? '-' : ''
+  return `${sign}$${formatNumber(Math.abs(value), 2)}`
+}
+
 /**
  * Format an audit value according to its XBRL unit: USD as compact currency,
  * share counts compactly, per-share figures to 2 decimals.
@@ -68,6 +75,7 @@ export function formatAuditValue(value: number | null | undefined, unit: string 
   if (value === null || value === undefined || Number.isNaN(value)) return NA
   if (unit === 'USD') return formatCompactCurrency(value)
   if (unit === 'shares') return formatCompactNumber(value)
+  if (unit === 'USD/shares') return formatPerShareCurrency(value)
   return formatNumber(value, 2)
 }
 
@@ -106,4 +114,12 @@ export function formatDateTime(iso: string | null | undefined): string {
       })
       .replace(/(\d{4}), /, '$1 at ') + ' ET'
   )
+}
+
+/** ISO date string -> "Q1 2026" (quarter derived from the month). Returns NA for null/invalid. */
+export function formatQuarter(iso: string | null | undefined): string {
+  const d = parseISO(iso)
+  if (!d) return NA
+  const quarter = Math.floor(d.getUTCMonth() / 3) + 1
+  return `Q${quarter} ${d.getUTCFullYear()}`
 }

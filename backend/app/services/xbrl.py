@@ -462,7 +462,7 @@ def _get_shares(
                 if matched_date in entry.amendment_keys:
                     warnings.append(warn(
                         WarningCode.AMENDMENT_EXISTS,
-                        f"Amendment filing used for '{_GAAP_SHARES_TAG}'; period: {matched_date}.",
+                        f"Amendment filing used for '{_GAAP_SHARES_TAG}', period: {matched_date}.",
                         concept=_GAAP_SHARES_TAG,
                     ))
                 return value, _GAAP_SHARES_TAG, warnings
@@ -596,7 +596,7 @@ def _resolve_instant(
             if matched_date in entry.amendment_keys:
                 result_warnings.append(warn(
                     WarningCode.AMENDMENT_EXISTS,
-                    f"Amendment filing used for '{tag}'; period: {matched_date}.",
+                    f"Amendment filing used for '{tag}', period: {matched_date}.",
                     concept=tag,
                 ))
             return _ConceptResult(
@@ -813,12 +813,7 @@ def _build_audit_entry(concept: str, result: _ConceptResult) -> AuditEntry:
     `AuditEntry.value` stores the value used for this period's calculation -
     TTM-bridged for flow concepts, point-in-time for balance-sheet concepts.
 
-    Note on `entity_context`: hardcoded to "consolidated" (the default in
-    `AuditEntry`) because the extractor does not currently inspect XBRL
-    context IDs to distinguish consolidated vs. segment-level facts. The
-    deduplication rules favour the most authoritative filing, which in
-    practice is always the consolidated report. A future phase could parse
-    context IDs to label the rare segment-only case.
+    Note on `entity_context`: hardcoded to "consolidated" (the default in `AuditEntry`).
     """
     return AuditEntry(
         concept=concept,
@@ -859,6 +854,32 @@ def _extract_for_anchor(
     audit: list[AuditEntry] = []
 
     # =======================================================================
+    # Market data (shares, EPS)
+    # =======================================================================
+    # Placed first so the audit reads like a model header (shares/EPS on top),
+    # matching the Excel input order. `_get_shares` returns its own
+    # (value, tag, warnings) tuple rather than a _ConceptResult, so the audit
+    # entry is built inline here.
+
+    shares, shares_tag, shares_warnings = _get_shares(
+        gaap, dei, period_end, anchor.accn, instant_cache=instant_cache,
+    )
+    warnings.extend(shares_warnings)
+    audit.append(AuditEntry(
+        concept="Shares Outstanding",
+        xbrl_tag=shares_tag,
+        unit="shares",
+        value=shares,
+    ))
+
+    # EPS concept name is "EPS" regardless of which tag fires. The xbrl_tag
+    # field records the exact tag used (diluted vs basic), is_fallback flags
+    # the basic-EPS path, and FALLBACK_EPS_BASIC explains it in plain English.
+    eps_result = _extract_eps(gaap, period_end, fy_start, flow_cache=flow_cache)
+    warnings.extend(eps_result.warnings)
+    audit.append(_build_audit_entry("EPS", eps_result))
+
+    # =======================================================================
     # Income statement (TTM bridge)
     # =======================================================================
 
@@ -887,13 +908,6 @@ def _extract_for_anchor(
     warnings.extend(net_income_result.warnings)
     audit.append(_build_audit_entry("Net Income", net_income_result))
 
-    # EPS concept name is "EPS" regardless of which tag fires. The xbrl_tag
-    # field records the exact tag used (diluted vs basic), is_fallback flags
-    # the basic-EPS path, and FALLBACK_EPS_BASIC explains it in plain English.
-    eps_result = _extract_eps(gaap, period_end, fy_start, flow_cache=flow_cache)
-    warnings.extend(eps_result.warnings)
-    audit.append(_build_audit_entry("EPS", eps_result))
-
     # =======================================================================
     # Cash flow (TTM bridge)
     # =======================================================================
@@ -910,7 +924,7 @@ def _extract_for_anchor(
     audit.append(_build_audit_entry("CapEx", capex_result))
 
     # =======================================================================
-    # Balance sheet (point-in-time)
+    # Balance sheet - book value
     # =======================================================================
 
     total_assets_result = _resolve_instant(
@@ -927,6 +941,10 @@ def _extract_for_anchor(
     warnings.extend(stockholders_equity_result.warnings)
     audit.append(_build_audit_entry("Stockholders Equity", stockholders_equity_result))
 
+    # =======================================================================
+    # Balance sheet - EV bridge (ordered to mirror the EV buildup)
+    # =======================================================================
+
     # Long-term debt - may signal that total LTD was used, in which case the
     # current portion is zeroed out below to avoid double-counting.
     long_term_debt_result, used_total_lt_debt = _extract_debt(
@@ -935,8 +953,16 @@ def _extract_for_anchor(
     warnings.extend(long_term_debt_result.warnings)
     audit.append(_build_audit_entry("Long-Term Debt", long_term_debt_result))
 
+    short_term_borrowings_result = _resolve_instant(
+        gaap, _INSTANT_CHAINS["short_term_borrowings"], period_end,
+        instant_cache=instant_cache,
+    )
+    warnings.extend(short_term_borrowings_result.warnings)
+    audit.append(_build_audit_entry("Short-Term Borrowings", short_term_borrowings_result))
+
     # Current portion of LT debt - skipped (zeroed out) when total LTD was used.
     # Both branches produce a _ConceptResult so the warning/audit pattern is uniform.
+    # Depends on used_total_lt_debt from the long-term debt extraction above.
     if used_total_lt_debt:
         current_portion_lt_debt_result = _ConceptResult(value=None)
     else:
@@ -946,13 +972,6 @@ def _extract_for_anchor(
         )
     warnings.extend(current_portion_lt_debt_result.warnings)
     audit.append(_build_audit_entry("Current Portion LT Debt", current_portion_lt_debt_result))
-
-    short_term_borrowings_result = _resolve_instant(
-        gaap, _INSTANT_CHAINS["short_term_borrowings"], period_end,
-        instant_cache=instant_cache,
-    )
-    warnings.extend(short_term_borrowings_result.warnings)
-    audit.append(_build_audit_entry("Short-Term Borrowings", short_term_borrowings_result))
 
     finance_lease_current_result = _extract_finance_lease(
         gaap, period_end, current=True, instant_cache=instant_cache,
@@ -965,10 +984,6 @@ def _extract_for_anchor(
     )
     warnings.extend(finance_lease_noncurrent_result.warnings)
     audit.append(_build_audit_entry("Finance Lease (Non-Current)", finance_lease_noncurrent_result))
-
-    cash_result = _extract_cash(gaap, period_end, instant_cache=instant_cache)
-    warnings.extend(cash_result.warnings)
-    audit.append(_build_audit_entry("Cash", cash_result))
 
     minority_interest_result = _resolve_instant(
         gaap, _INSTANT_CHAINS["minority_interest"], period_end,
@@ -984,22 +999,9 @@ def _extract_for_anchor(
     warnings.extend(preferred_stock_result.warnings)
     audit.append(_build_audit_entry("Preferred Stock", preferred_stock_result))
 
-    # =======================================================================
-    # Shares outstanding (point-in-time, no TTM bridge)
-    # =======================================================================
-    # `_get_shares` returns its own (value, tag, warnings) tuple rather than
-    # a _ConceptResult, so the audit entry is built inline here.
-
-    shares, shares_tag, shares_warnings = _get_shares(
-        gaap, dei, period_end, anchor.accn, instant_cache=instant_cache,
-    )
-    warnings.extend(shares_warnings)
-    audit.append(AuditEntry(
-        concept="Shares Outstanding",
-        xbrl_tag=shares_tag,
-        unit="shares",
-        value=shares,
-    ))
+    cash_result = _extract_cash(gaap, period_end, instant_cache=instant_cache)
+    warnings.extend(cash_result.warnings)
+    audit.append(_build_audit_entry("Cash", cash_result))
 
     # =======================================================================
     # Sector-specific lease warning

@@ -4,7 +4,7 @@ import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip
 import { Badge } from '@/components/ui/badge'
 import { Sparkline } from '@/components/Sparkline'
 import { cn } from '@/lib/utils'
-import { dedupeWarnings, formatDate, formatMultiple } from '@/lib/format'
+import { dedupeWarnings, formatDate, formatMultiple, formatQuarter } from '@/lib/format'
 import { MULTIPLE_KEYS, type MultipleKey, type MultipleValue, type TTMPeriod, type Warning, } from '@/api/types'
 
 const ROW_LABELS: Record<MultipleKey, string> = {
@@ -130,7 +130,7 @@ export function ResultsTable({ periods }: { periods: TTMPeriod[] }) {
                     {String(i + 1).padStart(2, '0')}
                   </span>
                   <span className="tnum text-xs">
-                    {formatDate(p.period_end)}
+                    {formatQuarter(p.period_end)}
                   </span>
                   <span className="tnum text-[0.6875rem] text-muted-foreground">
                     filed {formatDate(p.filing_date)}

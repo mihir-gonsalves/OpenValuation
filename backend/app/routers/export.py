@@ -18,21 +18,26 @@ from __future__ import annotations
 
 import logging
 
-from fastapi import APIRouter, HTTPException, Path
+from fastapi import APIRouter, Path, Request
 from fastapi.responses import Response
+
+from app.routers.financials import resolve_financials
+from app.services import workbook
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter()
+
+_XLSX_MEDIA_TYPE = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
 
 
 @router.get(
     "/export/{cik_10}",
     summary="Download valuation data as an Excel workbook.",
     description=(
-        "Returns a .xlsx workbook with three sheets: Summary (multiples), "
-        "Raw Financials (XBRL inputs), and Calculations (live Excel formulas). "
-        "Phase 4 feature - not yet implemented."
+        "Returns a .xlsx workbook: a Summary sheet (company metadata and a "
+        "live multiples matrix) plus one sheet per TTM period holding the raw "
+        "XBRL inputs, live Excel formulas, and warnings."
     ),
     responses={
         200: {
@@ -42,10 +47,10 @@ router = APIRouter()
             "description": "Excel workbook (.xlsx) binary stream.",
         },
         404: {"description": "CIK not found or no data available."},
-        501: {"description": "Excel export not yet implemented (Phase 4)."},
     },
 )
 async def export_workbook(
+    request: Request,
     cik_10: str = Path(
         ...,
         description="10-digit zero-padded EDGAR CIK, e.g. '0000320193'.",
@@ -56,38 +61,17 @@ async def export_workbook(
     """
     Stream a .xlsx workbook for the given CIK.
 
-    Phase 1: raises 501 Not Implemented.  
-    Phase 4: builds workbook from cached/fresh data and streams binary response.
+    Reuses the financials cache-or-fetch path (resolve_financials) so the export
+    reflects exactly what the results table shows, then serialises it to a
+    formula-driven workbook. EDGAR/extraction failures propagate as the same
+    structured HTTPExceptions the financials endpoint raises.
     """
-    # Phase 4: Replace the block below with actual workbook generation.
-    # Example Phase 4 implementation:
-    #
-    #   import app.cache as cache_store
-    #   from app.services import workbook
-    #   from app.routers.financials import _build_response
-    #
-    #   entry = cache_store.get(cik_10)
-    #   if entry is None:
-    #       # Trigger a full fetch (reuse financials endpoint logic)
-    #       ...
-    #
-    #   response = await _build_response(
-    #       company_meta=entry.payload.company_meta,
-    #       companyfacts=entry.payload.companyfacts,
-    #       cached_at=entry.cached_at,
-    #   )
-    #   xlsx_bytes = workbook.build_workbook(response)
-    #   filename = f"openvaluation_{cik_10}.xlsx"
-    #   return Response(
-    #       content=xlsx_bytes,
-    #       media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-    #       headers={"Content-Disposition": f'attachment; filename="{filename}"'},
-    #   )
+    response = await resolve_financials(request, cik_10)
+    xlsx_bytes = workbook.build_workbook(response)
 
-    raise HTTPException(
-        status_code=501,
-        detail={
-            "error": "not_implemented",
-            "message": "Excel export is planned for Phase 4 and is not yet available.",
-        },
+    filename = f"openvaluation_{cik_10}.xlsx"
+    return Response(
+        content=xlsx_bytes,
+        media_type=_XLSX_MEDIA_TYPE,
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
     )

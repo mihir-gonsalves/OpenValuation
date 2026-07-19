@@ -35,7 +35,7 @@ from app.models.errors import Warning, WarningCode, warn
 
 _AGGREGATABLE_TEMPLATES: dict[str, str] = {
     WarningCode.TTM_ANNUALIZED.value: (
-        "Prior-year data unavailable for {names}; TTM annualized from current YTD."
+        "Prior-year data unavailable for {names}. TTM annualized from current YTD."
     ),
     WarningCode.AMENDMENT_EXISTS.value: (
         "Amendment filing used for {names}."
@@ -74,7 +74,7 @@ def _make_flow_warnings(
     if was_annualized:
         warnings.append(warn(
             WarningCode.TTM_ANNUALIZED,
-            f"Prior-year YTD unavailable for {concept_name}; "
+            f"Prior-year YTD unavailable for {concept_name}. "
             "TTM annualized from current YTD.",
             concept=concept_name,
         ))
@@ -82,7 +82,7 @@ def _make_flow_warnings(
     if (fiscal_year_start, period_end) in amendment_keys:
         warnings.append(warn(
             WarningCode.AMENDMENT_EXISTS,
-            f"Amendment filing used for '{tag}'; "
+            f"Amendment filing used for '{tag}'. "
             f"({fiscal_year_start}-{period_end}).",
             concept=tag,
         ))
@@ -106,7 +106,7 @@ def dedup_warnings(warnings: list[Warning]) -> list[Warning]:
     Example. If TTM_ANNUALIZED fires for Revenue, OCF, and EPS in one period,
     the output reads:
 
-        "Prior-year data unavailable for Revenue, Operating Cash Flow, EPS;
+        "Prior-year data unavailable for Revenue, Operating Cash Flow, EPS.
          TTM annualized from current YTD."
 
     rather than showing the same warning three times with different concept names.

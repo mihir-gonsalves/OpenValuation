@@ -83,6 +83,15 @@ export class ApiError extends Error {
 }
 
 /**
+ * The backend is unreachable - either `fetch` threw (network failure / CORS / a
+ * cold start the browser gave up on, status 0) or a gateway returned 5xx because
+ * the server behind it is down. Refreshing wakes the free-tier backend.
+ */
+export function unreachableError(status = 0): ApiError {
+  return new ApiError(status, 'http_error', 'Could not reach the server. Please refresh the page.')
+}
+
+/**
  * Normalize the many error body shapes FastAPI can return into ApiError.
  *  - Explicit errors:  { detail: { error, message } }  (conventional)
  *  - Or top-level:     { error, message }
@@ -98,6 +107,10 @@ export function toApiError(status: number, body: unknown): ApiError {
   if (Array.isArray(detail) && detail[0]?.msg) {
     return new ApiError(status, 'invalid_cik', String(detail[0].msg))
   }
+  // 502/503/504 without a structured body means the backend is unreachable.
+  if (status === 502 || status === 503 || status === 504) {
+    return unreachableError(status)
+  }
   return new ApiError(status, 'http_error', `Request failed (${status})`)
 }
 
@@ -106,9 +119,7 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   try {
     res = await fetch(`${API_BASE}${path}`, init)
   } catch {
-    // Network failure / CORS / server unreachable (incl. a long cold start that
-    // exceeded the browser's patience).
-    throw new ApiError(0, 'http_error', 'Could not reach the server.')
+    throw unreachableError()
   }
 
   if (!res.ok) {

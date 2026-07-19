@@ -113,24 +113,27 @@ def compute_all(financials: ExtractedFinancials) -> tuple[MultipleSet, EVCompone
     ev, ev_components, ev_warnings = compute_enterprise_value(financials)
     market_cap = ev_components.market_cap
 
+    ev_revenue_value, ev_revenue_warnings = compute_ev_revenue(ev, financials.revenue)
+    ev_ebitda_value, ev_ebitda_warnings = compute_ev_ebitda(
+        ev, financials.operating_income, financials.depreciation_and_amortization,
+    )
+    ev_ebit_value, ev_ebit_warnings = compute_ev_ebit(ev, financials.operating_income)
     pe_value, pe_label, pe_warnings = compute_pe(
         financials.price,
         financials.eps_diluted,
         eps_is_basic=_eps_is_basic(financials),
     )
-    ev_ebitda_value, ev_ebitda_warnings = compute_ev_ebitda(
-        ev, financials.operating_income, financials.depreciation_and_amortization,
-    )
-    ev_ebit_value, ev_ebit_warnings = compute_ev_ebit(ev, financials.operating_income)
-    ev_revenue_value, ev_revenue_warnings = compute_ev_revenue(ev, financials.revenue)
-    ps_value, ps_warnings = compute_ps(market_cap, financials.revenue)
-    pb_value, pb_warnings = compute_pb(market_cap, financials.stockholders_equity)
     pfcf_value, pfcf_warnings = compute_pfcf(
         market_cap, financials.operating_cash_flow, financials.capex,
     )
+    ps_value, ps_warnings = compute_ps(market_cap, financials.revenue)
+    pb_value, pb_warnings = compute_pb(market_cap, financials.stockholders_equity)
 
     multiples = MultipleSet(
-        pe=MultipleValue(value=pe_value, label=pe_label, warnings=pe_warnings),
+        ev_revenue=MultipleValue(
+            value=ev_revenue_value, label="EV/Revenue",
+            warnings=ev_revenue_warnings + ev_warnings,
+        ),
         ev_ebitda=MultipleValue(
             value=ev_ebitda_value, label="EV/EBITDA",
             warnings=ev_ebitda_warnings + ev_warnings,
@@ -139,13 +142,10 @@ def compute_all(financials: ExtractedFinancials) -> tuple[MultipleSet, EVCompone
             value=ev_ebit_value, label="EV/EBIT",
             warnings=ev_ebit_warnings + ev_warnings,
         ),
-        ev_revenue=MultipleValue(
-            value=ev_revenue_value, label="EV/Revenue",
-            warnings=ev_revenue_warnings + ev_warnings,
-        ),
+        pe=MultipleValue(value=pe_value, label=pe_label, warnings=pe_warnings),
+        pfcf=MultipleValue(value=pfcf_value, label="P/FCF", warnings=pfcf_warnings),
         ps=MultipleValue(value=ps_value, label="P/S", warnings=ps_warnings),
         pb=MultipleValue(value=pb_value, label="P/B", warnings=pb_warnings),
-        pfcf=MultipleValue(value=pfcf_value, label="P/FCF", warnings=pfcf_warnings),
     )
     return multiples, ev_components
 
@@ -231,23 +231,12 @@ def compute_enterprise_value(f: ExtractedFinancials) -> tuple[Decimal | None, EV
 # ---------------------------------------------------------------------------
 
 
-def compute_pe(
-    price: Decimal | None,
-    eps: Decimal | None,
-    *,
-    eps_is_basic: bool = False,
-) -> tuple[Decimal | None, str, list[Warning]]:
-    """
-    P/E = Price / EPS (TTM).
-
-    `eps` is ExtractedFinancials.eps_diluted, which already holds basic EPS when
-    the diluted tag was absent (Phase 2 fallback). `eps_is_basic` only changes
-    the label to 'P/E (basic)' - the fallback_eps_basic warning was already
-    attached in Phase 2. Negative EPS yields a (valid) negative P/E.
-    """
-    label = "P/E (basic)" if eps_is_basic else "P/E"
-    value, warnings = _safe_divide(price, eps, "EPS")
-    return value, label, warnings
+def compute_ev_revenue(
+    ev: Decimal | None,
+    revenue: Decimal | None,
+) -> tuple[Decimal | None, list[Warning]]:
+    """EV/Revenue = EV / Revenue."""
+    return _safe_divide(ev, revenue, "Revenue")
 
 
 def compute_ev_ebitda(
@@ -276,12 +265,49 @@ def compute_ev_ebit(
     return _safe_divide(ev, operating_income, "Operating Income")
 
 
-def compute_ev_revenue(
-    ev: Decimal | None,
-    revenue: Decimal | None,
+def compute_pe(
+    price: Decimal | None,
+    eps: Decimal | None,
+    *,
+    eps_is_basic: bool = False,
+) -> tuple[Decimal | None, str, list[Warning]]:
+    """
+    P/E = Price / EPS (TTM).
+
+    `eps` is ExtractedFinancials.eps_diluted, which already holds basic EPS when
+    the diluted tag was absent (Phase 2 fallback). `eps_is_basic` only changes
+    the label to 'P/E (basic)' - the fallback_eps_basic warning was already
+    attached in Phase 2. Negative EPS yields a (valid) negative P/E.
+    """
+    label = "P/E (basic)" if eps_is_basic else "P/E"
+    value, warnings = _safe_divide(price, eps, "EPS")
+    return value, label, warnings
+
+
+def compute_pfcf(
+    market_cap: Decimal | None,
+    operating_cash_flow: Decimal | None,
+    capex: Decimal | None,
 ) -> tuple[Decimal | None, list[Warning]]:
-    """EV/Revenue = EV / Revenue."""
-    return _safe_divide(ev, revenue, "Revenue")
+    """
+    P/FCF = Market Cap / (Operating Cash Flow - CapEx).
+
+    Negative FCF -> N/A with negative_fcf. Unlike P/E, a negative P/FCF is not
+    reported as a negative multiple (professional databases suppress it). Like
+    P/B's negative-equity guard, it is a distinct condition that fires on present
+    data and so carries a warning - see PHASE_3_SPEC §2.7. The negative check
+    runs before the near-zero guard, mirroring P/B's "distinct condition first"
+    rule. CapEx is already a non-negative outflow (Phase 2 normalises its sign).
+    """
+    if market_cap is None or operating_cash_flow is None or capex is None:
+        return None, []
+    fcf = operating_cash_flow - capex
+    if fcf < _ZERO:
+        return None, [warn(
+            WarningCode.NEGATIVE_FCF,
+            "Free cash flow is negative, which is not analytically interpretable",
+        )]
+    return _safe_divide(market_cap, fcf, "Free Cash Flow")
 
 
 def compute_ps(
@@ -312,29 +338,3 @@ def compute_pb(
             "interpretable",
         )]
     return _safe_divide(market_cap, stockholders_equity, "Stockholders' Equity")
-
-
-def compute_pfcf(
-    market_cap: Decimal | None,
-    operating_cash_flow: Decimal | None,
-    capex: Decimal | None,
-) -> tuple[Decimal | None, list[Warning]]:
-    """
-    P/FCF = Market Cap / (Operating Cash Flow - CapEx).
-
-    Negative FCF -> N/A with negative_fcf. Unlike P/E, a negative P/FCF is not
-    reported as a negative multiple (professional databases suppress it). Like
-    P/B's negative-equity guard, it is a distinct condition that fires on present
-    data and so carries a warning - see PHASE_3_SPEC §2.7. The negative check
-    runs before the near-zero guard, mirroring P/B's "distinct condition first"
-    rule. CapEx is already a non-negative outflow (Phase 2 normalises its sign).
-    """
-    if market_cap is None or operating_cash_flow is None or capex is None:
-        return None, []
-    fcf = operating_cash_flow - capex
-    if fcf < _ZERO:
-        return None, [warn(
-            WarningCode.NEGATIVE_FCF,
-            "Free cash flow is negative, which is not analytically interpretable",
-        )]
-    return _safe_divide(market_cap, fcf, "Free Cash Flow")

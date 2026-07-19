@@ -7,7 +7,7 @@
  * or unknown company will not become valid on retry).
  */
 import { keepPreviousData, useMutation, useQuery } from '@tanstack/react-query'
-import { ApiError, getExportUrl, getFinancials, pingHealth, search, toApiError } from './client'
+import { ApiError, getExportUrl, getFinancials, pingHealth, search, toApiError, unreachableError } from './client'
 import type { FinancialsResponse, SearchResponse } from './types'
 
 /** A cold server can take 30-50s to wake. Retry server/network
@@ -70,7 +70,7 @@ export function useExport() {
       try {
         res = await fetch(getExportUrl(cik10))
       } catch {
-        throw new ApiError(0, 'http_error', 'Could not reach the server.')
+        throw unreachableError()
       }
       if (!res.ok) {
         if (res.status === 501) {

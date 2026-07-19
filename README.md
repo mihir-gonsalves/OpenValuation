@@ -29,15 +29,19 @@ uvicorn app.main:app --reload --port 8000
 
 **Frontend**
 
-*(Frontend arrives in Phase 4 - not yet in the repository.)*
-
 ```bash
 cd frontend
 npm install
 npm run dev
 ```
 
-Frontend runs at `http://localhost:5173` and proxies API requests to `http://localhost:8000`.
+Other useful scripts can be found in `frontend/README.md`
+
+Frontend runs at `http://localhost:5173` and proxies `/api` requests to `http://localhost:8000`
+(see `frontend/vite.config.ts`), so no CORS configuration is needed in development.
+
+In production, set `VITE_API_BASE` (in `frontend/.env` - see `.env.example`) to the deployed
+backend URL, and add the Vercel frontend origin to the backend's `ALLOWED_ORIGINS`.
 
 
 
@@ -202,7 +206,7 @@ Generates a `.xlsx` workbook with three sheets:
 └───────────────────────────┬──────────────────────────────────────────┘
                             │ HTTP (JSON)
 ┌───────────────────────────▼──────────────────────────────────────────┐
-│               React + Vite  (hosted on Vercel)                       │
+│            React 19 + Vite + TS  (hosted on Vercel)                  │
 │                                                                      │
 │  SearchBar -> SearchDropdown -> ResultsTable -> DownloadButton       │
 │                            AuditPanel                                │
@@ -237,7 +241,7 @@ Generates a `.xlsx` workbook with three sheets:
 
 | Layer | Tool | Notes |
 |---|---|---|
-| Frontend | React 18 + Vite | No SSR, FastAPI owns all computation |
+| Frontend | React 19 + Vite + TypeScript | No SSR, FastAPI owns all computation |
 | Frontend hosting | Vercel | Deploys from GitHub, global CDN |
 | Backend | FastAPI + Pydantic | Async, strong typing |
 | Backend hosting | Render (free tier) | See cold start limitations |
@@ -348,20 +352,40 @@ OpenValuation/
 │   └── requirements.txt
 ├── frontend/
 │   ├── src/
-│   │   ├── App.jsx
+│   │   ├── App.tsx
+│   │   ├── index.css                  Design tokens (single styling control point)
+│   │   ├── main.tsx
+│   │   ├── api/
+│   │   │   ├── client.ts              Typed fetch wrappers + Decimal coercion
+│   │   │   ├── queries.ts             TanStack Query hooks
+│   │   │   └── types.ts               Typed mirror of the Pydantic contract
 │   │   ├── components/
-│   │   │   ├── SearchBar.jsx
-│   │   │   ├── SearchDropdown.jsx
-│   │   │   ├── ResultsTable.jsx
-│   │   │   ├── AuditPanel.jsx
-│   │   │   ├── LoadingState.jsx
-│   │   │   └── ErrorMessage.jsx
-│   │   └── api/
-│   │       └── client.js            Typed fetch wrappers for all backend routes
+│   │   │   ├── AuditPanel.tsx
+│   │   │   ├── CompanyHeader.tsx
+│   │   │   ├── CopyLinkButton.tsx
+│   │   │   ├── DownloadButton.tsx
+│   │   │   ├── ErrorMessage.tsx
+│   │   │   ├── ExampleChips.tsx
+│   │   │   ├── Learn.tsx
+│   │   │   ├── LoadingState.tsx
+│   │   │   ├── ResultsTable.tsx
+│   │   │   ├── SearchBar.tsx
+│   │   │   ├── SearchDropdown.tsx
+│   │   │   ├── Sparkline.tsx
+│   │   │   ├── WarmingNotice.tsx
+│   │   │   └── ui/                     Vendored, re-themed radix primitives
+│   │   └── lib/
+│   │       ├── errors.ts              Error code -> friendly copy
+│   │       ├── format.ts              Display formatting helpers
+│   │       ├── useDebounce.ts
+│   │       ├── useServerReady.ts
+│   │       └── utils.ts
 │   ├── index.html
-│   └── vite.config.js
+│   └── vite.config.ts
 ├── README.md
-└── DESIGN.md
+├── DESIGN.md
+├── PROJECT_STATUS.md
+└── PHASE_*_SPEC.md
 ```
 
 

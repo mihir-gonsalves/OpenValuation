@@ -41,7 +41,7 @@ describe('formatAuditValue', () => {
     expect(formatAuditValue(1.52e10, 'shares')).toBe('15.2B')
   })
   it('formats per-share to 2 decimals', () => {
-    expect(formatAuditValue(6.6, 'USD/shares')).toBe('6.60')
+    expect(formatAuditValue(6.6, 'USD/shares')).toBe('$6.60')
   })
 })
 

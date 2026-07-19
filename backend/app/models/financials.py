@@ -55,10 +55,13 @@ class AuditEntry(BaseModel):
         default="consolidated",
         description=(
             "'consolidated' or 'segment', derived from the XBRL context. "
-            "Phase 2 hardcodes 'consolidated' - the deduplication rules favour "
-            "non-amendment originals which in practice are always the consolidated "
-            "report. A future phase could parse context IDs to label rare segment-only "
-            "filings. See PHASE_2_SPEC.md §4 (Known limitations)."
+            "Hardcoded 'consolidated': the SEC companyfacts endpoint (the sole "
+            "data source) only exposes facts tagged against the default entity "
+            "context and omits dimensional segment/member breakdowns, so no "
+            "segment-level value ever reaches the extractor - the label is "
+            "guaranteed by the source, not merely favoured by deduplication. "
+            "A future phase parsing raw instance documents could populate this "
+            "from context IDs. See PHASE_2_SPEC.md §4 (Known limitations)."
         ),
     )
     value: Decimal | None = Field(
@@ -228,13 +231,13 @@ class MultipleSet(BaseModel):
     Phase 3: multiples engine populates each field.
     """
 
-    pe:         MultipleValue = Field(default_factory=lambda: MultipleValue(label="P/E"))
+    ev_revenue: MultipleValue = Field(default_factory=lambda: MultipleValue(label="EV/Revenue"))
     ev_ebitda:  MultipleValue = Field(default_factory=lambda: MultipleValue(label="EV/EBITDA"))
     ev_ebit:    MultipleValue = Field(default_factory=lambda: MultipleValue(label="EV/EBIT"))
-    ev_revenue: MultipleValue = Field(default_factory=lambda: MultipleValue(label="EV/Revenue"))
+    pe:         MultipleValue = Field(default_factory=lambda: MultipleValue(label="P/E"))
+    pfcf:       MultipleValue = Field(default_factory=lambda: MultipleValue(label="P/FCF"))
     ps:         MultipleValue = Field(default_factory=lambda: MultipleValue(label="P/S"))
     pb:         MultipleValue = Field(default_factory=lambda: MultipleValue(label="P/B"))
-    pfcf:       MultipleValue = Field(default_factory=lambda: MultipleValue(label="P/FCF"))
 
 
 # ---------------------------------------------------------------------------

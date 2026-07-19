@@ -97,13 +97,13 @@ regex `^\d{10}$`. `periods` is empty in Phase 1, up to 12 entries from Phase 2 o
 {
   "period_end": "2024-09-28", "filing_date": "2024-11-01", "price": "222.9100",
   "multiples": {
-    "pe":         { "value": "33.12", "label": "P/E",        "warnings": [] },
+    "ev_revenue": { "value": "7.81",  "label": "EV/Revenue", "warnings": [] },
     "ev_ebitda":  { "value": "21.40", "label": "EV/EBITDA",  "warnings": [] },
     "ev_ebit":    { "value": "25.11", "label": "EV/EBIT",    "warnings": [] },
-    "ev_revenue": { "value": "7.81",  "label": "EV/Revenue", "warnings": [] },
+    "pe":         { "value": "33.12", "label": "P/E",        "warnings": [] },
+    "pfcf":       { "value": "26.33", "label": "P/FCF",      "warnings": [] },
     "ps":         { "value": "8.54",  "label": "P/S",        "warnings": [] },
-    "pb":         { "value": "45.22", "label": "P/B",        "warnings": [] },
-    "pfcf":       { "value": "26.33", "label": "P/FCF",      "warnings": [] }
+    "pb":         { "value": "45.22", "label": "P/B",        "warnings": [] }
   },
   "ev_components": { "market_cap": "...", "long_term_debt": "...", "cash": "...", "enterprise_value": "...", "...": "..." },
   "extracted": { "...": "ExtractedFinancials - see app/models/financials.py" },
@@ -311,7 +311,7 @@ every per-multiple warning. The implemented pattern iterates the seven
 `MultipleSet` fields **explicitly** (in `financials.py` as `_MULTIPLE_FIELDS`):
 
 ```python
-_MULTIPLE_FIELDS = ("pe", "ev_ebitda", "ev_ebit", "ev_revenue", "ps", "pb", "pfcf")
+_MULTIPLE_FIELDS = ("ev_revenue", "ev_ebitda", "ev_ebit", "pe", "pfcf", "ps", "pb")
 multiples_warnings = [
     w
     for field_name in _MULTIPLE_FIELDS
@@ -329,7 +329,7 @@ warnings (`denominator_near_zero`, `negative_book_value`, ...) from the API and 
 **Warning deduplication.** The router now applies `dedup_warnings` to the merged
 union before building `TTMPeriod.warnings`. This collapses repeated codes - most
 importantly `ev_debt_missing`, which Phase 3 should attach to each EV-based multiple
-(`ev_ebitda`, `ev_ebit`, `ev_revenue`) so it reaches the response. Without dedup,
+(`ev_revenue`, `ev_ebitda`, `ev_ebit`) so it reaches the response. Without dedup,
 that produces three identical rows in the UI/Excel. The dedup at the router boundary
 collapses them automatically, so Phase 3 implementers can attach the warning to each
 affected multiple without worrying about triplication.

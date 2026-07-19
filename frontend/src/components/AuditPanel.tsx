@@ -5,7 +5,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow, } from '
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { cn } from '@/lib/utils'
-import { formatAuditValue, formatCompactCurrency, formatDate, NA } from '@/lib/format'
+import { formatAuditValue, formatCompactCurrency, formatQuarter, NA } from '@/lib/format'
 import type { EVComponents, TTMPeriod } from '@/api/types'
 
 function EVBreakdown({ ev }: { ev: EVComponents }) {
@@ -70,9 +70,9 @@ export function AuditPanel({ periods }: { periods: TTMPeriod[] }) {
             <Button
               key={p.period_end}
               onClick={() => setSelected(i)}
-              className={cn('tnum min-w-25 justify-center rounded-sm text-xs', i === selected && 'bg-accent border-primary/75')}
+              className={cn('tnum min-w-20 justify-center rounded-sm text-xs', i === selected && 'bg-accent border-primary/75')}
             >
-              {formatDate(p.period_end)}
+              {formatQuarter(p.period_end)}
             </Button>
           ))}
         </div>
@@ -83,8 +83,8 @@ export function AuditPanel({ periods }: { periods: TTMPeriod[] }) {
           <TableHeader>
             <TableRow className="border-dashed hover:bg-transparent">
               <TableHead className="min-w-52 px-3.5 align-middle text-left">Concept</TableHead>
-              <TableHead className="px-2.5 align-middle text-left">XBRL tag</TableHead>
-              <TableHead className="px-2.5 align-middle text-left">Context</TableHead>
+              <TableHead className="px-2.5 align-middle text-left">Reported XBRL Tag</TableHead>
+              {/* <TableHead className="px-2.5 align-middle text-left">Context</TableHead> */}
               <TableHead className="px-2.5 align-middle text-right">Unit</TableHead>
               <TableHead className="px-3.5 align-middle text-right">Value</TableHead>
             </TableRow>
@@ -101,9 +101,9 @@ export function AuditPanel({ periods }: { periods: TTMPeriod[] }) {
                 <TableCell className="text-muted-foreground text-xs">
                   {entry.xbrl_tag ?? NA }
                 </TableCell>
-                <TableCell className="text-muted-foreground text-xs">
+                {/* <TableCell className="text-muted-foreground text-xs">
                   {entry.entity_context ?? NA }
-                </TableCell>
+                </TableCell> */}
                 <TableCell className="text-muted-foreground text-xs text-right">
                   {entry.unit ?? NA }
                 </TableCell>

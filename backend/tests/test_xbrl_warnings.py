@@ -201,10 +201,10 @@ class TestMakeFlowWarnings:
         )
         codes = [w.code for w in result]
         assert "amendment_exists" in codes
-        # Message uses the Option-B '; period <date>.' format
         msg = next(w.message for w in result if w.code == "amendment_exists")
         assert "NetCashProvidedByUsedInOperatingActivities" in msg
-        assert ";" in msg
+        # Message uses the '<tag>. (<period>).' format
+        assert ". (" in msg
 
     def test_both_warnings_when_both_conditions_met(self):
         key = (date(2024, 1, 1), date(2024, 9, 30))

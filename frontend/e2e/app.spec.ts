@@ -25,13 +25,13 @@ const FINANCIALS = {
       period_end: '2024-09-28',
       price: 220,
       multiples: {
-        pe: multiple('P/E', 33.1),
+        ev_revenue: multiple('EV/Revenue', 7.8),
         ev_ebitda: multiple('EV/EBITDA', 21.4),
         ev_ebit: multiple('EV/EBIT', 25.1),
-        ev_revenue: multiple('EV/Revenue', 7.8),
+        pe: multiple('P/E', 33.1),
+        pfcf: multiple('P/FCF', 26.3),
         ps: multiple('P/S', 8.5),
         pb: multiple('P/B', 45.2),
-        pfcf: multiple('P/FCF', 26.3),
       },
       ev_components: {
         market_cap: 3.4e12,

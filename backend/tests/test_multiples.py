@@ -31,13 +31,13 @@ from app.models.financials import AuditEntry, ExtractedFinancials
 from app.services.multiples import (
     compute_all,
     compute_enterprise_value,
-    compute_ev_ebit,
-    compute_ev_ebitda,
     compute_ev_revenue,
-    compute_pb,
+    compute_ev_ebitda,
+    compute_ev_ebit,
     compute_pe,
     compute_pfcf,
     compute_ps,
+    compute_pb,
 )
 from app.services.xbrl import extract_ttm_periods
 from app.services.xbrl_warnings import dedup_warnings
@@ -328,14 +328,14 @@ class TestComputeAll:
         ev = market_cap + D("8000") - D("3000")  # 55,000
         assert components.enterprise_value == ev
 
-        assert multiples.pe.value == D("50") / D("2.5")          # 20
-        assert multiples.pe.label == "P/E"
+        assert multiples.ev_revenue.value == ev / D("20000")
         assert multiples.ev_ebitda.value == ev / D("5000")        # 4000+1000
         assert multiples.ev_ebit.value == ev / D("4000")
-        assert multiples.ev_revenue.value == ev / D("20000")
+        assert multiples.pe.value == D("50") / D("2.5")          # 20
+        assert multiples.pe.label == "P/E"
+        assert multiples.pfcf.value == market_cap / D("4000")     # 5000-1000
         assert multiples.ps.value == market_cap / D("20000")
         assert multiples.pb.value == market_cap / D("10000")      # 5
-        assert multiples.pfcf.value == market_cap / D("4000")     # 5000-1000
 
     def test_basic_eps_label_read_from_audit(self):
         f = self._full_period()
@@ -358,13 +358,13 @@ class TestComputeAll:
             depreciation_and_amortization=D("1000"),
         )
         multiples, _ = compute_all(f)
-        for field in ("ev_ebitda", "ev_ebit", "ev_revenue"):
+        for field in ("ev_revenue", "ev_ebitda", "ev_ebit"):
             mult = getattr(multiples, field)
             assert WarningCode.EV_DEBT_MISSING in _codes(mult.warnings)
         # P/S and P/B do not depend on EV, so they never carry it.
         assert WarningCode.EV_DEBT_MISSING not in _codes(multiples.ps.warnings)
 
-        union = [w for field in ("pe", "ev_ebitda", "ev_ebit", "ev_revenue", "ps", "pb", "pfcf")
+        union = [w for field in ("ev_revenue", "ev_ebitda", "ev_ebit", "pe", "pfcf", "ps", "pb")
                  for w in getattr(multiples, field).warnings]
         deduped = dedup_warnings(union)
         assert _codes(deduped).count(WarningCode.EV_DEBT_MISSING) == 1
@@ -374,12 +374,12 @@ class TestComputeAll:
         f.price = None  # simulate price_unavailable
         multiples, components = compute_all(f)
         assert components.market_cap is None
-        for field in ("pe", "ev_ebitda", "ev_ebit", "ev_revenue", "ps", "pb", "pfcf"):
+        for field in ("ev_revenue", "ev_ebitda", "ev_ebit", "pe", "pfcf", "ps", "pb"):
             assert getattr(multiples, field).value is None
 
     def test_returns_decimal_never_float(self):
         multiples, _ = compute_all(self._full_period())
-        for field in ("pe", "ev_ebitda", "ev_ebit", "ev_revenue", "ps", "pb", "pfcf"):
+        for field in ("ev_revenue", "ev_ebitda", "ev_ebit", "pe", "pfcf", "ps", "pb"):
             value = getattr(multiples, field).value
             assert value is None or isinstance(value, Decimal)
 
@@ -430,12 +430,12 @@ class TestRealDataPath:
         assert multiples.pb.value == market_cap / D("73733000000")
 
         # AAPL carries real debt -> no understatement flag anywhere.
-        all_warnings = [w for field in ("pe", "ev_ebitda", "ev_ebit", "ev_revenue", "ps", "pb", "pfcf")
+        all_warnings = [w for field in ("ev_revenue", "ev_ebitda", "ev_ebit", "pe", "pfcf", "ps", "pb")
                         for w in getattr(multiples, field).warnings]
         assert WarningCode.EV_DEBT_MISSING not in _codes(all_warnings)
         # EV-based multiples are computable.
-        assert multiples.ev_ebit.value is not None
         assert multiples.ev_ebitda.value is not None
+        assert multiples.ev_ebit.value is not None
 
     async def test_snow_negative_eps_gives_negative_pe(self):
         from datetime import date
