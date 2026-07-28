@@ -64,9 +64,9 @@ const FINANCIALS = {
         current_portion_lt_debt: null,
         finance_lease_current: null,
         finance_lease_noncurrent: null,
-        cash: null,
         minority_interest: null,
         preferred_stock: null,
+        cash: null,
         audit: [
           {
             concept: 'Revenue',

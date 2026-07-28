@@ -45,7 +45,7 @@ export function formatCompactCurrency(value: number | null | undefined): string 
   return `${sign}$${abs.toFixed(2)}`
 }
 
-/** Per-share / small numeric values (EPS, price). */
+/** Non-per-share values (revenues, D&A, capex, etc.) */
 export function formatNumber(value: number | null | undefined, digits = 2): string {
   if (value === null || value === undefined || Number.isNaN(value)) return NA
   return value.toLocaleString('en-US', {
@@ -114,12 +114,4 @@ export function formatDateTime(iso: string | null | undefined): string {
       })
       .replace(/(\d{4}), /, '$1 at ') + ' ET'
   )
-}
-
-/** ISO date string -> "Q1 2026" (quarter derived from the month). Returns NA for null/invalid. */
-export function formatQuarter(iso: string | null | undefined): string {
-  const d = parseISO(iso)
-  if (!d) return NA
-  const quarter = Math.floor(d.getUTCMonth() / 3) + 1
-  return `Q${quarter} ${d.getUTCFullYear()}`
 }

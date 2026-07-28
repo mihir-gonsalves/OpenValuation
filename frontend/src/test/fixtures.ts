@@ -5,13 +5,7 @@
  * trimmed to a few periods and tuned to exercise the cases the UI must handle:
  * full data, an N/A multiple, the basic-EPS label flip, and per-period warnings.
  */
-import type {
-  FinancialsResponse,
-  MultipleSet,
-  SearchResponse,
-  TTMPeriod,
-  Warning,
-} from '@/api/types'
+import type { FinancialsResponse, MultipleSet, SearchResponse, TTMPeriod, Warning } from '@/api/types'
 
 function emptyExtracted(period_end: string, filing_date: string) {
   return {
@@ -33,9 +27,9 @@ function emptyExtracted(period_end: string, filing_date: string) {
     current_portion_lt_debt: null,
     finance_lease_current: null,
     finance_lease_noncurrent: null,
-    cash: null,
     minority_interest: null,
     preferred_stock: null,
+    cash: null,
     audit: [],
     warnings: [],
   }
@@ -61,11 +55,13 @@ function multipleSet(values: Partial<Record<keyof MultipleSet, number | null>>):
 function aaplPeriod(
   period_end: string,
   filing_date: string,
+  label: string,
   vals: Partial<Record<keyof MultipleSet, number>>,
 ): TTMPeriod {
   return {
     filing_date,
     period_end,
+    label,
     price: 220,
     multiples: multipleSet(vals),
     ev_components: {
@@ -129,7 +125,7 @@ export const aaplFinancials: FinancialsResponse = {
     is_capital_intensive: true,
   },
   periods: [
-    aaplPeriod('2024-09-28', '2024-11-01', {
+    aaplPeriod('2024-09-28', '2024-11-01', 'Q4 FY24', {
       ev_revenue: 7.8,
       ev_ebitda: 21.4,
       ev_ebit: 25.1,
@@ -138,7 +134,7 @@ export const aaplFinancials: FinancialsResponse = {
       ps: 8.5,
       pb: 45.2,
     }),
-    aaplPeriod('2024-06-29', '2024-08-02', {
+    aaplPeriod('2024-06-29', '2024-08-02', 'Q3 FY24', {
       ev_revenue: 7.4,
       ev_ebitda: 20.1,
       ev_ebit: 23.9,
@@ -147,7 +143,7 @@ export const aaplFinancials: FinancialsResponse = {
       ps: 8.1,
       pb: 43.0,
     }),
-    aaplPeriod('2024-03-30', '2024-05-03', {
+    aaplPeriod('2024-03-30', '2024-05-03', 'Q2 FY24', {
       ev_revenue: 7.0,
       ev_ebitda: 18.9,
       ev_ebit: 22.2,
@@ -177,6 +173,7 @@ export const msftFinancials: FinancialsResponse = {
     {
       filing_date: '2024-10-30',
       period_end: '2024-09-30',
+      label: 'Q1 FY25',
       price: 420,
       multiples: {
         ev_revenue: { value: 12.1, label: 'EV/Revenue', warnings: [] },

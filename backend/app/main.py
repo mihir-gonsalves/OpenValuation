@@ -2,20 +2,8 @@
 """
 OpenValuation's FastAPI application entry point.
 
-Lifespan (startup / shutdown)
-------------------------------
-1. Create the shared httpx.AsyncClient for EDGAR and attach to app.state.
-2. Load the in-memory company index once. Failure is non-fatal (search
-   returns empty results until a lazy refresh on the /api/search path succeeds).
-3. On shutdown: close the shared AsyncClient.
-
-Module scope (runs once at import time)
-----------------------------------------
-- Register CORS middleware.
-- Mount routers:
-    POST /api/search
-    GET  /api/financials/{cik_10}
-    GET  /api/export/{cik_10}
+Owns the lifespan (shared EDGAR client, company index), CORS, the structured
+error handlers, the three /api routers, and /health.
 """
 
 from __future__ import annotations
@@ -62,26 +50,14 @@ logger = logging.getLogger(__name__)
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     """
-    Application lifespan handler.
+    Create the shared EDGAR client and load the company index, then close the client on shutdown.
 
-    Startup:
-      - Create the shared httpx.AsyncClient for EDGAR (connection pooling) and
-        attach it to app.state.
-      - Load the in-memory company index once. Failure is non-fatal (search
-        returns empty results until a later lazy refresh succeeds).
-
-    Shutdown:
-      - Close the shared httpx.AsyncClient. No other cleanup is required.
-
-    Note: the company index is refreshed lazily on the /api/search path
-    (CompanyIndex.maybe_refresh), not by a background task here.
+    The index load is non-fatal, and the index refreshes lazily on the search
+    path (CompanyIndex.maybe_refresh) rather than from a background task here.
     """
-    # --- Startup ---
     logger.info("Starting OpenValuation API.")
 
-    # Shared HTTP client for all EDGAR requests.
-    # A single client maintains a connection pool, so TCP connections to
-    # data.sec.gov are reused across requests rather than re-opened each time.
+    # One client keeps a connection pool, so TCP connections to data.sec.gov are reused across requests.
     edgar_client = httpx.AsyncClient(timeout=EDGAR_TIMEOUT_SECONDS)
     app.state.edgar_client = edgar_client
 
@@ -123,28 +99,31 @@ app = FastAPI(
 )
 
 # ---------------------------------------------------------------------------
-# Exception handlers (PHASE_1_SPEC §2.1 - top-level error body contract)
+# Exception handlers - the {"error", "message"} body contract
 # ---------------------------------------------------------------------------
 
 
 @app.exception_handler(StarletteHTTPException)
-async def structured_http_exception_handler(
-    request: Request, exc: StarletteHTTPException
-) -> JSONResponse:
-    """Unwrap {"error", "message"} detail dicts to the top level (PHASE_1_SPEC §2.1)."""
+async def structured_http_exception_handler(request: Request, exc: StarletteHTTPException) -> JSONResponse:
+    """
+    Unwrap {"error", "message"} detail dicts to the top level.
+    """
     if isinstance(exc.detail, dict) and "error" in exc.detail:
         return JSONResponse(status_code=exc.status_code, content=exc.detail)
     return JSONResponse(
         status_code=exc.status_code,
-        content={"error": "internal_error", "message": str(exc.detail)},
+        content={
+            "error": "internal_error",
+            "message": str(exc.detail)
+        },
     )
 
 
 @app.exception_handler(RequestValidationError)
-async def validation_exception_handler(
-    request: Request, exc: RequestValidationError
-) -> JSONResponse:
-    """Map path-level CIK validation failures to the documented invalid_cik code."""
+async def validation_exception_handler(request: Request, exc: RequestValidationError) -> JSONResponse:
+    """
+    Map path-level CIK validation failures to invalid_cik.
+    """
     if any(tuple(e.get("loc", ()))[:2] == ("path", "cik_10") for e in exc.errors()):
         return JSONResponse(
             status_code=422,
@@ -189,8 +168,7 @@ app.include_router(export.router, prefix="/api", tags=["Export"])
 @app.get("/health", tags=["Meta"], summary="Health and cache status.")
 async def health() -> dict:
     """
-    Returns API status and cache statistics.
-    Used by Render health checks and monitoring.
+    API status and cache statistics. Also the frontend's cold-start probe.
     """
     return {
         "status": "ok",

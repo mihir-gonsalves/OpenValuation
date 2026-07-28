@@ -1,27 +1,13 @@
 # backend/app/services/edgar.py
 """
-EDGAR HTTP client.
+EDGAR HTTP client: companyfacts and submissions, with a 15s timeout, one retry
+on 429, and network/HTTP errors translated into structured HTTPExceptions.
 
-Responsibilities
-----------------
-- Fetch the XBRL companyfacts payload for a given CIK_10.
-- Fetch company metadata (name, SIC, exchange) from the submissions endpoint.
-- Enforce a 15-second timeout on all outbound EDGAR calls.
-- Retry once with fixed backoff on HTTP 429 (rate limit).
-- Translate network and HTTP errors into structured FastAPI HTTPExceptions.
+Search never touches EDGAR, which keeps the typing path free of rate-limit
+exposure. EDGAR's own limit is 10 requests/second, comfortably above what a
+single-tenant deployment reaches, so the retry is only a safety net.
 
-EDGAR is NOT used during search. All EDGAR interactions occur exclusively in:
-  - GET /api/financials/{cik_10}
-  - GET /api/export/{cik_10}
-This keeps the search path free from rate-limit exposure.
-
-Rate limit: 10 requests/second. Single-tenant Render deployment is unlikely
-to hit this, but the retry is a safety net.
-
-URL format
-----------
-CIK_10 must be zero-padded to 10 digits (e.g. '0000320193').
-EDGAR API calls prefix it with 'CIK': CIK0000320193.
+URLs take CIK_10 prefixed with 'CIK', e.g. CIK0000320193.
 """
 
 from __future__ import annotations
@@ -59,9 +45,8 @@ async def _resolve_client(client: httpx.AsyncClient | None) -> AsyncIterator[htt
     """
     Yield the provided client, or create and close a short-lived one.
 
-    Callers that hold the lifespan-managed client from app.state pass it in to
-    benefit from connection pooling. Callers without one (e.g. tests, one-off
-    scripts) pass None and get a clean client scoped to the call.
+    Production callers pass the lifespan client from app.state for connection
+    pooling. Tests and scripts pass None and get a client scoped to the call.
     """
     if client is not None:
         yield client
@@ -72,14 +57,10 @@ async def _resolve_client(client: httpx.AsyncClient | None) -> AsyncIterator[htt
 
 async def _get(client: httpx.AsyncClient, url: str) -> dict[str, Any]:
     """
-    Perform a single GET request to an EDGAR endpoint.
+    GET an EDGAR endpoint, retrying once on 429.
 
-    Timeout: 15 seconds (enforced at the httpx client level, not here).
-
-    - On 429: waits EDGAR_RATE_LIMIT_BACKOFF_SECONDS, retries once.  
-    - On timeout: raises HTTP 503 with a user-readable message.  
-    - On 404: raises HTTP 404.  
-    - On other 4xx/5xx: raises HTTP 502.
+    Timeouts and network errors become 503, 404 stays 404, and any other status
+    becomes 502. The timeout itself is enforced on the httpx client.
     """
     for attempt in (1, 2):
         try:
@@ -120,11 +101,7 @@ async def _get(client: httpx.AsyncClient, url: str) -> dict[str, Any]:
 
         if resp.status_code == 429:
             if attempt == 1:
-                logger.warning(
-                    "EDGAR rate limit (429) on %s - waiting %.1fs before retry.",
-                    url,
-                    EDGAR_RATE_LIMIT_BACKOFF_SECONDS,
-                )
+                logger.warning("EDGAR rate limit (429) on %s - waiting %.1fs before retry.", url, EDGAR_RATE_LIMIT_BACKOFF_SECONDS)
                 await asyncio.sleep(EDGAR_RATE_LIMIT_BACKOFF_SECONDS)
                 continue
             raise HTTPException(
@@ -138,9 +115,7 @@ async def _get(client: httpx.AsyncClient, url: str) -> dict[str, Any]:
                 },
             )
 
-        logger.error(
-            "EDGAR returned unexpected HTTP %d for %s.", resp.status_code, url
-        )
+        logger.error("EDGAR returned unexpected HTTP %d for %s.", resp.status_code, url)
         raise HTTPException(
             status_code=502,
             detail={
@@ -152,16 +127,10 @@ async def _get(client: httpx.AsyncClient, url: str) -> dict[str, Any]:
 
 def _check_taxonomy(cik_10: str, facts: dict[str, Any]) -> None:
     """
-    Raise HTTP 422 if the companyfacts payload does not contain us-gaap facts.
+    Raise 422 if the payload carries no us-gaap facts.
 
-    Two distinct cases are handled explicitly rather than silently returning a
-    payload that Phase 2 would find empty:
-
-      - IFRS filer:  'ifrs-full' present, 'us-gaap' absent.
-      - Other filer: neither taxonomy present (e.g. DEI-only early filers).
-
-    Both cases raise 422 so the user gets a clear explanation rather than
-    seeing zero periods with no indication why.
+    IFRS filers and filers with neither taxonomy (DEI-only early filers) are
+    separated so the user gets an explanation rather than an unexplained zero periods.
     """
     if "us-gaap" in facts:
         return
@@ -179,11 +148,7 @@ def _check_taxonomy(cik_10: str, facts: dict[str, Any]) -> None:
             },
         )
 
-    logger.warning(
-        "No us-gaap facts for CIK %s - available taxonomies: %s.",
-        cik_10,
-        list(facts.keys()),
-    )
+    logger.warning("No us-gaap facts for CIK %s - available taxonomies: %s.", cik_10, list(facts.keys()),)
     raise HTTPException(
         status_code=422,
         detail={
@@ -203,18 +168,9 @@ def _check_taxonomy(cik_10: str, facts: dict[str, Any]) -> None:
 
 async def fetch_companyfacts(cik_10: str, client: httpx.AsyncClient | None = None) -> dict[str, Any]:
     """
-    Fetch the full XBRL companyfacts payload for `cik_10` from EDGAR.
+    Fetch the raw companyfacts payload for `cik_10`, typically 5-10 MB.
 
-    Returns the raw JSON dict. Typically 5-10 MB.
-
-    Parameters
-    ----------
-    cik_10  : 10-digit zero-padded CIK.
-    client  : Optional shared httpx.AsyncClient (e.g. from app.state).
-              If None, a short-lived client is created and closed internally.
-              Pass the lifespan client in production to benefit from connection reuse.
-
-    Raises HTTPException on timeout, 404, 429, unsupported taxonomy, or unexpected errors.
+    Raises HTTPException on timeout, 404, 429, or an unsupported taxonomy.
     """
     url = COMPANYFACTS_URL.format(cik_10=cik_10)
     logger.info("Fetching companyfacts for CIK %s.", cik_10)
@@ -230,17 +186,7 @@ async def fetch_companyfacts(cik_10: str, client: httpx.AsyncClient | None = Non
 
 async def fetch_metadata(cik_10: str, client: httpx.AsyncClient | None = None) -> dict[str, Any]:
     """
-    Fetch company metadata from the EDGAR submissions endpoint for `cik_10`.
-
-    Returns the raw JSON dict containing name, tickers, exchanges, SIC, etc.
-
-    Parameters
-    ----------
-    cik_10  : 10-digit zero-padded CIK.
-    client  : Optional shared httpx.AsyncClient (e.g. from app.state).
-              If None, a short-lived client is created and closed internally.
-
-    Raises HTTPException on timeout, 404, 429, or unexpected errors.
+    Fetch the raw submissions payload for `cik_10`: name, tickers, exchanges, SIC.
     """
     url = SUBMISSIONS_URL.format(cik_10=cik_10)
     logger.info("Fetching metadata for CIK %s.", cik_10)

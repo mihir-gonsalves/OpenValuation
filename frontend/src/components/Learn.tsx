@@ -15,9 +15,7 @@ function Entry({ q, children }: { q: string; children: React.ReactNode }) {
 }
 
 /**
- * A plain-English glossary for people new to the terms this tool uses - cold
- * starts, TTM, and what each multiple actually measures. Reachable at /learn
- * (e.g. from the cold-start notice).
+ * A plain-English glossary for people new to the terms this tool uses.
  */
 export function Learn() {
   const navigate = useNavigate()
@@ -90,6 +88,22 @@ export function Learn() {
             report. Companies file reports every three months, so TTM adds up the four
             most recent quarters to give you an up-to-date, full-year picture without requiring
             the official annual report.
+          </p>
+        </Entry>
+
+        <Entry q="Why don't the quarters line up with the calendar?">
+          <p>
+            Every company picks its own <strong>fiscal year</strong>: a 12-month accounting
+            calendar that does not have to start in January. Quarterly reports must follow the
+            chosen schedule, so a filing might be labeled Q2 or Q3 even if it's January.
+            The numbers still cover three months of business, the company is simply further
+            along in its own fiscal year.
+          </p>
+          <p>
+            <strong>Fiscal Year</strong> is often shortened to {" "}<em>FY</em>. A label like
+            "Q2 FY26" represents the second quarter of the company's 2026 fiscal year - the same
+            as "Q2 2026," but making it clear the year refers to the company's fiscal calendar
+            rather than the regular calendar.
           </p>
         </Entry>
 

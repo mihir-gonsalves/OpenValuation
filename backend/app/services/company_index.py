@@ -2,33 +2,13 @@
 """
 In-memory company index for POST /api/search.
 
-Design
-------
-Source:  https://www.sec.gov/files/company_tickers.json  
-Format:  { "0": { "cik_str": 320193, "ticker": "AAPL", "title": "Apple Inc." }, ... }
+Source: https://www.sec.gov/files/company_tickers.json, roughly 10k entries,
+loaded once at startup and rebuilt lazily when a search arrives more than 24
+hours later. The triggering request waits for that rebuild and concurrent
+requests wait on the same one. There is no background task.
 
-The dataset (~10 k entries) is loaded once at startup into an in-memory list. It is refreshed
-lazily on the /api/search path: a search arriving >24h after the last load triggers a rebuild
-before returning (CompanyIndex.maybe_refresh). There is no background task.
-
-Search queries never call EDGAR or any per-query external service, matching runs
-entirely against the in-memory index. The only network activity on the search path
-is the index refresh, which runs at most once per 24 hours (the triggering request
-waits for it, concurrent requests wait on the same refresh).
-
-Search algorithm
-----------------
-1. Exact ticker match (case-insensitive) -> score 100
-2. Name exact match (normalised)         -> score  90
-3. Name prefix match (normalised)        -> score  70
-4. Name substring match (normalised)     -> score  50
-Results are sorted by score (desc), deduplicated by CIK, and capped at 5.
-
-CIK normalisation
------------------
-SEC provides CIKs as integers (e.g. 320193).
-All entries are immediately converted to CIK_10 (zero-padded 10-digit string)
-at ingestion time (e.g. '0000320193').
+Matching is entirely in-memory, so no query ever touches an external service.
+CIKs arrive as integers and are normalized to CIK_10 at ingestion.
 """
 
 from __future__ import annotations
@@ -41,7 +21,7 @@ from typing import Any
 
 import httpx
 
-from app.models.company import CompanyCandidate, normalise_cik
+from app.models.company import CompanyCandidate, normalize_cik
 from app.user_agent import sec_headers
 
 logger = logging.getLogger(__name__)
@@ -51,15 +31,10 @@ logger = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 
 TICKERS_URL = "https://www.sec.gov/files/company_tickers.json"
-REFRESH_INTERVAL_SECONDS = 24 * 3600  # 24 hours
-REFRESH_FAILURE_COOLDOWN_SECONDS = 300  # don't re-attempt a failed refresh for 5 min
+REFRESH_INTERVAL_SECONDS = 24 * 3600
+REFRESH_FAILURE_COOLDOWN_SECONDS = 300
 MAX_RESULTS = 5
 LOAD_TIMEOUT_SECONDS = 20.0
-
-
-# ---------------------------------------------------------------------------
-# Internal entry (not exposed via API)
-# ---------------------------------------------------------------------------
 
 
 @dataclass(slots=True)
@@ -70,15 +45,9 @@ class _IndexEntry:
     name_lower: str      # lower-cased + stripped for matching
 
 
-# ---------------------------------------------------------------------------
-# CompanyIndex
-# ---------------------------------------------------------------------------
-
-
 class CompanyIndex:
     """
-    Thread-safe (single-writer) in-memory company index.
-    Loaded at application startup, refreshed lazily on search requests.
+    Single-writer in-memory index, loaded at startup and refreshed lazily.
     """
 
     def __init__(self) -> None:
@@ -87,33 +56,26 @@ class CompanyIndex:
         self._last_attempt_at: float = 0.0  # time.monotonic(), set on every refresh try
         self._lock = asyncio.Lock()
 
-    # ------------------------------------------------------------------
-    # Public interface
-    # ------------------------------------------------------------------
-
     async def load(self) -> None:
         """
-        Fetch and build the index from SEC.
-
-        Called once at startup (lifespan). The lazy refresh path uses
-        _fetch_and_build directly, not this method.
-        Raises on network failure, startup caller should handle this gracefully.
+        Build the index from SEC. Raises on failure, which the startup caller
+        is expected to swallow.
         """
         async with self._lock:
             await self._fetch_and_build()
 
     async def maybe_refresh(self) -> None:
         """
-        Refresh the index if it is older than REFRESH_INTERVAL_SECONDS.
-        After a failed refresh, waits REFRESH_FAILURE_COOLDOWN_SECONDS before
-        re-attempting, so SEC outages don't stall every search for up to 20s.
-        Errors during refresh are logged but do not propagate to the caller.
+        Rebuild the index if it is stale, swallowing any failure.
+
+        A failed attempt starts a cooldown, so an SEC outage does not stall
+        every subsequent search for the full 20s load timeout.
         """
         now = time.monotonic()
         if now - self._last_loaded_at < REFRESH_INTERVAL_SECONDS:
             return
         if now - self._last_attempt_at < REFRESH_FAILURE_COOLDOWN_SECONDS:
-            return  # recent attempt failed, serve stale index without re-fetching
+            return  # a recent attempt failed, so serve the stale index
         try:
             async with self._lock:
                 now = time.monotonic()
@@ -128,10 +90,8 @@ class CompanyIndex:
 
     def search(self, query: str) -> list[CompanyCandidate]:
         """
-        Search the in-memory index for `query`.
-
-        Returns up to MAX_RESULTS candidates, sorted by match score (descending).
-        Deduplicates by CIK in case the same company appears under multiple tickers.
+        Up to MAX_RESULTS candidates, best score first, deduplicated by CIK in
+        case one company appears under several tickers.
         """
         query = query.strip()
         if not query:
@@ -147,7 +107,7 @@ class CompanyIndex:
             if score > 0:
                 scored.append((score, entry))
 
-        # Sort: highest score first, then alphabetical by name for stability
+        # Name is the tiebreak, which keeps the ordering stable across requests.
         scored.sort(key=lambda t: (-t[0], t[1].name_lower))
 
         # Deduplicate by CIK (keep highest-score occurrence)
@@ -158,11 +118,7 @@ class CompanyIndex:
                 continue
             seen_ciks.add(entry.cik_10)
             results.append(
-                CompanyCandidate(
-                    cik_10=entry.cik_10,
-                    name=entry.name,
-                    ticker=entry.ticker,
-                )
+                CompanyCandidate(cik_10=entry.cik_10, name=entry.name, ticker=entry.ticker)
             )
             if len(results) == MAX_RESULTS:
                 break
@@ -172,15 +128,13 @@ class CompanyIndex:
     def __len__(self) -> int:
         return len(self._entries)
 
-    # ------------------------------------------------------------------
-    # Private helpers
-    # ------------------------------------------------------------------
-
     @staticmethod
     def _score(entry: _IndexEntry, q_upper: str, q_lower: str) -> int:
         """
-        Compute a match score for `entry` against the query.
-        Returns 0 if no match, positive otherwise (higher = better match).
+        Match score for `entry`, 0 for no match.
+
+        The tiers are spaced far apart so a future signal can adjust a score
+        without reordering them.
         """
         # 1. Exact ticker match (highest priority)
         if entry.ticker == q_upper:
@@ -202,8 +156,7 @@ class CompanyIndex:
 
     async def _fetch_and_build(self) -> None:
         """
-        Internal: fetch company_tickers.json and rebuild _entries.
-        Must be called with self._lock held.
+        Fetch company_tickers.json and rebuild _entries. Requires the lock.
         """
         logger.info("Fetching company index from %s.", TICKERS_URL)
         try:
@@ -228,7 +181,7 @@ class CompanyIndex:
         entries: list[_IndexEntry] = []
         for item in raw.values():
             try:
-                cik_10 = normalise_cik(item["cik_str"])
+                cik_10 = normalize_cik(item["cik_str"])
                 ticker = str(item.get("ticker") or "").upper()
                 name = str(item.get("title") or "").strip()
                 entries.append(
@@ -240,7 +193,7 @@ class CompanyIndex:
                     )
                 )
             except (KeyError, ValueError):
-                continue  # malformed entry - skip silently
+                continue  # skip malformed entries
 
         self._entries = entries
         self._last_loaded_at = time.monotonic()

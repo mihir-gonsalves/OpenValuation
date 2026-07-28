@@ -2,81 +2,46 @@
 """
 XBRL fact-map machinery - pure data transformation, no extraction logic.
 
+Deduplication, map building, the TTM bridge, and instant lookup. This module
+has no knowledge of which XBRL tags exist, which is what makes it testable on
+synthetic fact lists.
+
 Glossary
 --------
-Most of the terms below are XBRL or SEC-specific.
-
 fact
-    A single XBRL measurement reported in one filing. Has a numeric value, a
-    unit (USD, USD/shares, shares), period information, and the accession
-    number identifying the filing it came from.
+    One XBRL measurement from one filing: a value, a unit, period information,
+    and the accession number of the filing it came from.
 
 flow fact
-    A measurement taken OVER a span of time - revenue earned in a quarter,
-    cash spent over a year. Carries both `start` and `end` dates. Used
-    for income-statement and cash-flow concepts.
+    Measured over a span (revenue in a quarter), so it carries `start` and
+    `end`. Income statement and cash flow concepts.
 
 instant fact
-    A measurement taken AT a single point in time - cash on hand, debt
-    outstanding. Carries only an `end` date (no `start`). Used for
-    balance-sheet concepts.
-
-tag
-    The XBRL identifier for a concept, e.g. `"Revenues"` or `"Assets"`.
-    Inside each tag, facts are grouped by unit.
+    Measured at a point (cash on hand), so it carries only `end`. Balance
+    sheet concepts.
 
 accession number (accn)
-    The unique identifier of a single filing. The same fact may appear in
-    many filings (e.g. a Q3 figure shows up as "current period" in the Q3
-    10-Q and again as "prior-year comparative" in the next Q3's 10-Q). The
-    accn distinguishes them.
+    Identifies one filing. The same figure appears in several filings, as the
+    current period in one and a prior-year comparative in another, and the accn
+    is what distinguishes them.
 
 amendment
-    A filing whose form ends in `/A` (10-K/A, 10-Q/A). Filed to correct
-    or supplement an earlier filing. Deprioritised in deduplication - see
-    `_deduplicate_fact_group`.
+    A form ending in `/A`. Deprioritized in `_deduplicate_fact_group`.
 
 anchor
-    A 10-K or 10-Q filing chosen as the reference point for one TTM period.
-    Anchor discovery lives in xbrl.py, not here. This module just supplies
-    the lookups that anchor-driven extraction needs.
+    The 10-K or 10-Q a TTM period is built around. Discovery lives in xbrl.py.
 
 TTM bridge
-    The formula that constructs a trailing-twelve-month value from XBRL's
-    year-to-date and annual facts:
+    `TTM = PriorFY_Annual + CurrentYTD - PriorYTD_SamePeriod`, implemented in
+    `_get_ttm_value`. Flow concepts only, instants use direct lookup.
 
-        TTM = PriorFY_Annual + CurrentYTD - PriorYTD_SamePeriod
-
-    Implemented in `_get_ttm_value`. The bridge applies to flow concepts,
-    instant concepts use direct point-in-time lookup.
-
-Responsibilities of this module
--------------------------------
-- Shared duration / tolerance constants (annual range, prior-YTD fuzz, ...).
-- Type definitions for cached flow and instant maps.
-- Deduplication of facts that share the same period (`_deduplicate_fact_group`).
-- Map builders that turn raw fact lists into `_FlowEntry` / `_InstantEntry`.
-- TTM bridge implementation (`_get_ttm_value` plus its helpers).
-- Tolerance-aware point-in-time lookup (`_get_instant_result`).
-
-It has no knowledge of which XBRL tags exist - that lives in xbrl.py.
-
-Performance design
-------------------
-Each `_FlowEntry` carries two pre-built indexes constructed at map-build time:
-
-  annual_index     `{end_date: (fy_start, value)}` - annual-duration facts
-                   only (350-380 days). Enables O(1) prior-FY annual lookup
-                   in `_find_annual_fact`.
-
-  prior_ytd_index  `{fy_start: [(duration_days, value)]}` - all non-annual
-                   facts grouped by their start date (which is the fiscal-year
-                   start). Enables O(k) prior-YTD lookup in `_find_prior_ytd`,
-                   where k is the number of non-annual facts sharing one
-                   fiscal-year start (typically 3 - Q1, Q2, Q3 YTD).
-
-These indexes turn what would otherwise be linear scans of the full flow map
-into constant-time / small-k lookups.
+Performance
+-----------
+Each `_FlowEntry` carries two indexes built alongside its map: `annual_index`
+({end: (fy_start, value)}, annual-duration facts only) makes the prior-FY
+lookup O(1), and `prior_ytd_index` ({fy_start: [(duration, value)]}) makes the
+prior-YTD lookup O(k) over the handful of YTDs sharing a fiscal-year start.
+Without them the bridge would rescan the whole flow map on every call.
 """
 
 from __future__ import annotations
@@ -87,29 +52,24 @@ from decimal import Decimal
 from typing import NamedTuple
 
 # ---------------------------------------------------------------------------
-# Duration and tolerance constants (single source of truth)
+# Duration and tolerance constants
 # ---------------------------------------------------------------------------
 
-# Annual facts span roughly one year. Real filings occasionally drift to 364
-# or 366 days (leap years, 52/53-week fiscal calendars).
+# Annual facts span roughly a year, drifting with leap years and 52/53-week
+# fiscal calendars. A fact is annual by length, not by form type.
 _MIN_ANNUAL_DAYS = 350
 _MAX_ANNUAL_DAYS = 380
 
-# Prior-year YTDs can drift by a day or two from the current-year YTD because
-# of leap days and weekend/weekday calendar shifts. Accept up to +/- 4 days 
-# when matching the prior-YTD that mirrors the current YTD.
+# Absorbs the day or two of drift a leap day introduces between a YTD and its
+# prior-year mirror.
 _PRIOR_YTD_TOLERANCE_DAYS = 4
 
-# Balance-sheet dates from different sources (10-K vs 10-Q comparative) can
-# disagree by a few days. Accept up to +/-7 days when locating an instant fact.
+# Balance-sheet dates disagree by a few days across filings.
 _INSTANT_DATE_TOLERANCE_DAYS = 7
 
-# Used by the annualization fallback (when prior-year data is unavailable):
-#   annualized_value = ytd_value / (ytd_days / DAYS_PER_QUARTER) * 4
-_DAYS_PER_QUARTER = Decimal("91.25")  # 365.0 / 4
+_DAYS_PER_QUARTER = Decimal("91.25")
 
-# Refuse to annualize YTDs shorter than this. Anything below half a quarter
-# is too noisy to extrapolate (e.g. a partial stub month from a recent IPO).
+# Below half a quarter there is too little signal to extrapolate.
 _MIN_ANNUALIZATION_DAYS = 40
 
 # ---------------------------------------------------------------------------
@@ -129,22 +89,12 @@ _InstantCache = dict[tuple[str, str], "_InstantEntry"]
 
 class _FlowEntry(NamedTuple):
     """
-    Cached flow data for one (tag, unit) pair, reused across all anchor periods.
+    Cached flow data for one (tag, unit) pair, built once and reused across all
+    12 anchors.
 
-    Built once per companyfacts payload. Reuse avoids rebuilding the same
-    `O(n_facts)` structure for every anchor × tag combination - a 12× speed-up
-    in practice over a full 12-period extraction window.
-
-    Fields
-    ------
-    flow_map         The deduplicated `{(start, end): value}` map of flow facts.
-    amendment_keys   `(start, end)` pairs whose only source was an amendment.
-                     Drives the AMENDMENT_EXISTS warning.
-    ambiguous_keys   `(start, end)` pairs with conflicting non-amendment values.
-                     Drives the AMBIGUOUS_FACT warning, the value is dropped.
-    annual_index     End-date keyed index of full-year facts. See module docstring.
-    prior_ytd_index  Fiscal-year-start keyed index of partial-year facts.
-                     See module docstring.
+    `amendment_keys` are the periods whose only source was an amendment, and
+    `ambiguous_keys` are those with conflicting non-amendment values, whose
+    value is dropped. The two indexes are described in the module docstring.
     """
 
     flow_map: FlowMap
@@ -156,14 +106,7 @@ class _FlowEntry(NamedTuple):
 
 class _InstantEntry(NamedTuple):
     """
-    Cached instant data for one (tag, unit) pair. Mirrors `_FlowEntry` but
-    keyed by date rather than (start, end), since instant facts have no start.
-
-    Fields
-    ------
-    instant_map     The deduplicated `{end_date: value}` map of instant facts.
-    amendment_keys  Dates whose only source was an amendment filing.
-    ambiguous_keys  Dates with conflicting non-amendment values.
+    `_FlowEntry`'s counterpart, keyed by date alone since instants have no start.
     """
 
     instant_map: InstantMap
@@ -180,22 +123,13 @@ def _deduplicate_fact_group(
     facts: list[dict],
 ) -> tuple[Decimal | None, bool, bool]:
     """
-    The EDGAR companyfacts API returns the same (start, end) pair across multiple
-    filings (current period + comparative). Resolve a group of facts that share the 
-    same period (or same date, for instants) into a single canonical value.
+    Resolve facts sharing a period into one canonical value, returning
+    `(value, is_amendment_only, is_ambiguous)`.
 
-    Priority rules:
-      1. Non-amendment filings (10-K, 10-Q) preferred over amendments (10-K/A, 10-Q/A).
-      2. If multiple non-amendment facts for the same (start, end) agree -> use value.
-      3. If they disagree -> ambiguous_fact warning, value set to None.
-      4. Amendment-only facts -> use value, attach amendment_exists warning per period.
-
-    Returns
-    -------
-    `(value, is_amendment_only, is_ambiguous)`
-      value              Decimal if unambiguous, else None.
-      is_amendment_only  True when every fact in the group is an amendment.
-      is_ambiguous       True when non-amendment facts carry conflicting values.
+    `companyfacts` repeats the same period across filings, as a current period in
+    one and a comparative in another. Originals beat amendments, agreeing
+    originals give their value, disagreeing ones give None and flag ambiguity,
+    and an amendment-only group gives its value with the amendment flag set.
     """
     originals = [f for f in facts if not f.get("form", "").endswith("/A")]
     amendments = [f for f in facts if f.get("form", "").endswith("/A")]
@@ -208,7 +142,7 @@ def _deduplicate_fact_group(
         return Decimal(str(candidates[0]["val"])), is_amendment_only, False
     if len(distinct_values) > 1:
         return None, False, True
-    return None, False, False  # empty group - should not occur in practice
+    return None, False, False  # empty group, not expected in practice
 
 
 # ---------------------------------------------------------------------------
@@ -218,29 +152,19 @@ def _deduplicate_fact_group(
 
 def _build_flow_map(facts: list[dict]) -> _FlowEntry:
     """
-    Build a deduplicated flow map plus its two lookup indexes.
+    Build a deduplicated flow map plus its two lookup indexes. `facts` must
+    already be filtered to a single unit.
 
-    The caller is responsible for unit filtering - `facts` must already be a
-    single-unit list (e.g. `gaap[tag]["units"]["USD"]`).
-
-    Build sequence:
-      1. Group raw facts by `(start, end)` key.
-      2. Resolve each group through `_deduplicate_fact_group`, populating
-         the flow map plus the amendment/ambiguous key sets.
-      3. From the resolved flow map (not raw facts), partition entries into
-         the annual_index and prior_ytd_index. Using the resolved map means
-         both indexes inherit deduplication automatically - no chance of an
-         ambiguous fact slipping into one of the lookup indexes.
-
-    Why prior_ytd_index uses `defaultdict` internally but returns a plain
-    dict: the defaultdict's mutable default would surprise callers who
-    iterate keys and see new ones materialise.
+    The indexes are built from the resolved map rather than the raw facts, so
+    they inherit deduplication and no ambiguous fact can slip into either one.
+    The prior-YTD index is returned as a plain dict, since a defaultdict would
+    materialise keys under callers that iterate it.
     """
     # --- Step 1: group raw facts by (start, end) ---
     grouped: dict[tuple[date, date], list[dict]] = defaultdict(list)
     for f in facts:
         if "start" not in f:
-            continue  # instant fact - not a concern
+            continue  # instant fact
         key = (date.fromisoformat(f["start"]), date.fromisoformat(f["end"]))
         grouped[key].append(f)
 
@@ -280,16 +204,12 @@ def _build_flow_map(facts: list[dict]) -> _FlowEntry:
 
 def _build_instant_map(facts: list[dict]) -> _InstantEntry:
     """
-    Build a deduplicated instant map for one (tag, unit) pair.
-
-    Same shape as `_build_flow_map` but keyed by `end` only - instants have
-    no `start`. No annual / prior-YTD indexes are needed because instants
-    are point-in-time lookups, not bridges.
+    `_build_flow_map` keyed by `end` alone. Instants are point-in-time lookups, so they need no bridge indexes.
     """
     grouped: dict[date, list[dict]] = defaultdict(list)
     for f in facts:
         if "start" in f:
-            continue  # flow fact - not a concern
+            continue  # flow fact
         key = date.fromisoformat(f["end"])
         grouped[key].append(f)
 
@@ -323,10 +243,7 @@ def _find_annual_fact(
     target_end: date,
 ) -> tuple[date, Decimal] | None:
     """
-    Look up a full-year (350-380 day) fact ending exactly on `target_end`.
-
-    O(1) via the pre-built `annual_index`. Returns `(fiscal_year_start, value)`
-    or None.
+    O(1) lookup of a full-year fact ending exactly on `target_end`, returning `(fiscal_year_start, value)`.
     """
     return annual_index.get(target_end)
 
@@ -337,12 +254,8 @@ def _find_prior_ytd(
     ytd_duration_days: int,
 ) -> Decimal | None:
     """
-    Look up a year-to-date fact whose `start` equals `prior_fy_start` and
-    whose duration is within `_PRIOR_YTD_TOLERANCE_DAYS` of `ytd_duration_days`.
-
-    O(k) over `prior_ytd_index[prior_fy_start]`, where k is the number of
-    non-annual facts sharing that fiscal-year start - typically 3 (the Q1,
-    Q2, and Q3 YTDs of that year).
+    The YTD starting at `prior_fy_start` whose duration matches within tolerance.
+    O(k) over the few YTDs sharing that fiscal-year start.
     """
     for duration_days, value in prior_ytd_index.get(prior_fy_start, []):
         if abs(duration_days - ytd_duration_days) <= _PRIOR_YTD_TOLERANCE_DAYS:
@@ -355,15 +268,10 @@ def _annualize(
     ytd_duration_days: int,
 ) -> tuple[Decimal | None, bool]:
     """
-    Extrapolate a YTD value to a full-year estimate when no prior-year data
-    is available.
+    Extrapolate a YTD to a full year when prior-year data is unavailable.
 
-    Returns `(annualized_value, was_annualized)`. The boolean tells the
-    caller to attach a TTM_ANNUALIZED warning so the user knows the value
-    came from extrapolation rather than the full bridge.
-
-    Refuses to annualize YTDs shorter than `_MIN_ANNUALIZATION_DAYS` - too
-    little data to extrapolate meaningfully.
+    Returns `(value, was_annualized)`, where the flag tells the caller to
+    attach TTM_ANNUALIZED. Refuses YTDs shorter than the minimum.
     """
     if ytd_duration_days < _MIN_ANNUALIZATION_DAYS:
         return None, False
@@ -381,49 +289,36 @@ def _get_ttm_value(
     """
     Compute the TTM (trailing-twelve-month) value for a flow concept.
 
-    Returns `(ttm_value, was_annualized)`. `was_annualized=True` means the
-    bridge failed and the value came from the annualization fallback -
-    callers must attach the TTM_ANNUALIZED warning.
+    Returns `(ttm_value, was_annualized)`, where the flag means the bridge
+    failed and the caller must attach TTM_ANNUALIZED.
 
-    Algorithm
-    ---------
-    For an annual anchor (the YTD already spans ~365 days):
-
-        TTM = flow_map[(fiscal_year_start, period_end)]   # direct lookup
-
-    For a quarterly anchor, apply the bridge:
-
-        TTM = CurrentYTD + PriorFY_Annual - PriorYTD_SamePeriod
-
-    When the prior-FY annual or prior-YTD fact is missing (common for recent
-    IPOs or fiscal-year changes), fall back to annualization:
-
-        TTM ≈ CurrentYTD / quarters_elapsed × 4
+    An annual anchor reads the full-year fact directly. A quarterly anchor
+    applies `CurrentYTD + PriorFY_Annual - PriorYTD_SamePeriod`, falling back
+    to `CurrentYTD / quarters_elapsed × 4` when either prior-year component is
+    missing, which is common after an IPO or a fiscal-year change.
     """
     ytd_duration_days = (period_end - fiscal_year_start).days
 
-    # Annual anchor - full-year fact IS the TTM value.
+    # For an annual anchor the full-year fact is the TTM value.
     if ytd_duration_days >= _MIN_ANNUAL_DAYS:
         return flow_map.get((fiscal_year_start, period_end)), False
 
-    # Quarterly anchor - must have a current YTD to proceed.
+    # A quarterly anchor needs a current YTD. Nothing to extrapolate without it.
     current_ytd = flow_map.get((fiscal_year_start, period_end))
     if current_ytd is None:
         return None, False
 
-    # Look up the prior fiscal year's annual fact (O(1)).
     prior_fy_end = fiscal_year_start - timedelta(days=1)
     prior_annual = _find_annual_fact(annual_index, prior_fy_end)
     if prior_annual is None:
         return _annualize(current_ytd, ytd_duration_days)
     prior_fy_start, prior_fy_value = prior_annual
 
-    # Look up the prior-year YTD that mirrors the current YTD's duration (O(k)).
+    # The prior-year YTD mirroring the current YTD's duration.
     prior_ytd = _find_prior_ytd(prior_ytd_index, prior_fy_start, ytd_duration_days)
     if prior_ytd is None:
         return _annualize(current_ytd, ytd_duration_days)
 
-    # Apply the bridge.
     return current_ytd + prior_fy_value - prior_ytd, False
 
 
@@ -437,12 +332,11 @@ def _get_instant_result(
     period_end: date,
 ) -> tuple[Decimal | None, date | None]:
     """
-    Locate an instant fact at or near `period_end`, with a +/- 7 day tolerance.
+    Locate an instant fact at or near `period_end`, exact date first and then
+    outward to the tolerance limit.
 
-    Search order: exact date first, then +/-1, +/-2, ... up to the tolerance limit.
-    Returns `(value, matched_date)` so callers can verify whether the matched
-    date belongs to `amendment_keys` or `ambiguous_keys`. `matched_date` is
-    None when no value is found.
+    Returns `(value, matched_date)` so callers can check the matched date
+    against `amendment_keys` and `ambiguous_keys`.
     """
     value = instant_map.get(period_end)
     if value is not None:
@@ -457,13 +351,10 @@ def _get_instant_result(
 
 def _ambiguous_near(ambiguous_keys: set[date], period_end: date) -> date | None:
     """
-    Find the nearest date in `ambiguous_keys` within +/-7 days of `period_end`.
-    Returns None if no match.
+    The nearest ambiguous date within the tolerance window.
 
-    The search mirrors `_get_instant_result`'s tolerance window so ambiguity
-    checks cover the same dates as value lookups. Without this, an ambiguous
-    value at, say, period_end + 3 days would silently pass as "no match"
-    rather than producing an AMBIGUOUS_FACT warning.
+    Mirroring `_get_instant_result`'s window is what stops an ambiguous fact
+    three days off period-end from silently reading as absent.
     """
     if period_end in ambiguous_keys:
         return period_end

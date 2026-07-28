@@ -2,14 +2,9 @@
 """
 In-memory cache store for EDGAR payloads.
 
-Design:
-- Module-level dict: simple, zero-dependency, zero-cost.
-- Keyed by CIK_10 (10-digit zero-padded string). CIK is EDGAR's stable internal
-  identifier. Tickers can change, CIK never does.
-- TTL: 24 hours (CACHE_TTL_SECONDS from models/cache.py).
-- No background expiry thread. Stale entries are evicted lazily on read.
-- Not thread-safe for concurrent writes on the same key, but FastAPI's async
-  event loop runs in a single thread, so this is safe for now.
+A module-level dict keyed by CIK_10, since tickers change and CIKs do not. There
+is no expiry thread: stale entries are evicted lazily on read. Concurrent writes
+to one key are not safe, but the event loop is single-threaded.
 """
 
 from __future__ import annotations
@@ -29,11 +24,9 @@ logger = logging.getLogger(__name__)
 
 MAX_CACHE_ENTRIES = 8
 """
-Upper bound on cache size. Parsed companyfacts dicts are ~5x their JSON size
-(a 3.6 MB AAPL payload measures ~19 MB in memory), so 8 entries bounds the
-cache at roughly 150-250 MB, leaving headroom under Render free tier's 512 MB
-after the ~150-200 MB Python/FastAPI baseline. Eviction is oldest-first by
-cached_at, not LRU.
+Parsed companyfacts dicts run ~5x their JSON size (3.6 MB of AAPL measures
+~19 MB), so 8 entries bounds the cache near 150-250 MB. That leaves headroom
+under Render's 512 MB after the Python baseline. Eviction is oldest-first, not LRU.
 """
 
 _store: dict[str, CacheEntry] = {}
@@ -46,8 +39,7 @@ _store: dict[str, CacheEntry] = {}
 
 def get(cik_10: str) -> CacheEntry | None:
     """
-    Return the cache entry for `cik_10` if present and not expired, else None.  
-    Expired entries are lazily evicted on read.
+    Return the entry for `cik_10` if live, else None. Evicts on expiry.
     """
     entry = _store.get(cik_10)
     if entry is None:
@@ -60,18 +52,11 @@ def get(cik_10: str) -> CacheEntry | None:
     return entry
 
 
-def put(
-    cik_10: str,
-    companyfacts: dict[str, Any],
-    company_meta: CompanyMeta,
-) -> CacheEntry:
+def put(cik_10: str, companyfacts: dict[str, Any], company_meta: CompanyMeta) -> CacheEntry:
     """
-    Store a new cache entry for `cik_10`.  
-    Any existing entry (including non-expired ones) is overwritten.
-    When the cache is at MAX_CACHE_ENTRIES, the oldest entry is evicted first.
+    Store an entry for `cik_10`, overwriting any existing one.
     """
-    # Evict the oldest entry to make room, but only if this is a new key
-    # (overwriting an existing key doesn't grow the cache).
+    # Only a new key grows the cache, so only a new key can force an eviction.
     if cik_10 not in _store and len(_store) >= MAX_CACHE_ENTRIES:
         oldest_key = min(_store, key=lambda k: _store[k].cached_at)
         logger.info(
@@ -82,10 +67,7 @@ def put(
         )
         del _store[oldest_key]
 
-    payload = EDGARPayload(
-        companyfacts=companyfacts,
-        company_meta=company_meta,
-    )
+    payload = EDGARPayload(companyfacts=companyfacts, company_meta=company_meta)
     entry = CacheEntry(payload=payload)
     _store[cik_10] = entry
     logger.debug("Cached EDGAR payload for CIK %s.", cik_10)
@@ -94,14 +76,18 @@ def put(
 
 # Currently unused, kept for API completeness.
 def invalidate(cik_10: str) -> None:
-    """Evict the cache entry for `cik_10` if it exists."""
+    """
+    Evict the cache entry for `cik_10` if it exists.
+    """
     removed = _store.pop(cik_10, None)
     if removed is not None:
         logger.debug("Invalidated cache entry for CIK %s.", cik_10)
 
 
 def stats() -> dict[str, Any]:
-    """Return cache statistics for observability (e.g. health endpoint)."""
+    """
+    Cache statistics for the health endpoint.
+    """
     now = datetime.now(timezone.utc)
     total = len(_store)
     live = sum(

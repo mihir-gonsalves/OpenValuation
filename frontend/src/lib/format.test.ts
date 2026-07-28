@@ -1,12 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import {
-  formatAuditValue,
-  formatCompactCurrency,
-  formatDate,
-  formatDateTime,
-  formatMultiple,
-  NA,
-} from './format'
+import { formatAuditValue, formatCompactCurrency, formatDate, formatDateTime, formatMultiple, NA } from './format'
 
 describe('formatMultiple', () => {
   it('renders one decimal with an x suffix', () => {

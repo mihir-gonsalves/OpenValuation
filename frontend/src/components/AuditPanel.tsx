@@ -5,7 +5,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow, } from '
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { cn } from '@/lib/utils'
-import { formatAuditValue, formatCompactCurrency, formatQuarter, NA } from '@/lib/format'
+import { formatAuditValue, formatCompactCurrency, NA } from '@/lib/format'
 import type { EVComponents, TTMPeriod } from '@/api/types'
 
 function EVBreakdown({ ev }: { ev: EVComponents }) {
@@ -72,7 +72,7 @@ export function AuditPanel({ periods }: { periods: TTMPeriod[] }) {
               onClick={() => setSelected(i)}
               className={cn('tnum min-w-20 justify-center rounded-sm text-xs', i === selected && 'bg-accent border-primary/75')}
             >
-              {formatQuarter(p.period_end)}
+              {p.label}
             </Button>
           ))}
         </div>

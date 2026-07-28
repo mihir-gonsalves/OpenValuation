@@ -1,6 +1,6 @@
 # backend/tests/test_api_errors.py
 """
-Tests for the structured API error response contract (PHASE_1_SPEC §2.1).
+Tests for the structured API error response contract (PHASE_1_SPEC §5).
 
 Coverage:
   - invalid_cik: malformed CIK path param -> 422 with top-level {"error": "invalid_cik"}
@@ -29,7 +29,7 @@ def client():
 
 
 # ---------------------------------------------------------------------------
-# invalid_cik (§1.1 and PHASE_1_SPEC §2.2)
+# invalid_cik (§1.1 and PHASE_1_SPEC §5)
 # ---------------------------------------------------------------------------
 
 

@@ -2,25 +2,8 @@
 """
 GET /api/financials/{cik_10}
 
-Fetches EDGAR XBRL data and computed valuation multiples for a company.
-
-Flow:
-1. Validate CIK_10 format (422 on failure).
-2. Check in-memory cache for {cik_10} (hit -> skip steps 3-4).
-3. Fetch company metadata and XBRL companyfacts from EDGAR in parallel,
-   using the lifespan-managed httpx client from app.state.
-4. Write to cache.
-5. Extract financials from companyfacts (Phase 2: app/services/xbrl.py).
-6. Compute multiples (Phase 3: app/services/multiples.py).
-7. Return FinancialsResponse.
-
-Phase 2: _build_response is async, it awaits xbrl.extract_ttm_periods()
-         (which internally runs price fetches concurrently).
-         Phase 2 extraction data is never discarded.
-
-Phase 3: multiples.compute_all() populates each TTMPeriod's MultipleSet /
-         EVComponents. Any per-period exception is caught and logged, that
-         period's multiples are empty while extraction data is preserved.
+Cache lookup, then a parallel EDGAR fetch on a miss, then extraction (xbrl.py)
+and multiples (multiples.py) over the payload.
 """
 
 from __future__ import annotations
@@ -40,9 +23,8 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
-# MultipleSet field names for collecting per-multiple warnings.
-# Listed explicitly: vars() includes Pydantic internal keys, model_dump()
-# returns plain dicts that lose the .warnings attribute.
+# Listed explicitly: vars() includes Pydantic internal keys and model_dump()
+# returns plain dicts, so both break .warnings access.
 _MULTIPLE_FIELDS = (
     "ev_revenue", "ev_ebitda", "ev_ebit", "pe", "pfcf", "ps", "pb",
 )
@@ -68,20 +50,15 @@ async def get_financials(
     ),
 ) -> FinancialsResponse:
     """
-    Main data endpoint. Returns valuation multiples for the given CIK.
+    Main data endpoint.
     """
     return await resolve_financials(request, cik_10)
 
 
 async def resolve_financials(request: Request, cik_10: str) -> FinancialsResponse:
     """
-    Cache-or-fetch orchestration shared by the financials and export endpoints:
-    return the cached FinancialsResponse for `cik_10`, otherwise fetch from EDGAR
-    (writing the cache) and build it.
+    Cache-or-fetch orchestration shared by the financials and export endpoints.
     """
-    # -------------------------------------------------------------------------
-    # Step 2 - Cache lookup
-    # -------------------------------------------------------------------------
     cached_entry = cache_store.get(cik_10)
 
     if cached_entry is not None:
@@ -93,15 +70,10 @@ async def resolve_financials(request: Request, cik_10: str) -> FinancialsRespons
             cached_at=cached_entry.cached_at,
         )
 
-    # -------------------------------------------------------------------------
-    # Steps 3-4 - Fetch from EDGAR in parallel (cache miss)
-    # -------------------------------------------------------------------------
     logger.info("Cache miss for CIK %s - fetching from EDGAR.", cik_10)
 
-    # Two simultaneous misses for the same CIK both fetch and both write.
-    # The second write wins, both payloads are identical. The duplicate fetch
-    # is accepted: locking here adds complexity for negligible benefit at
-    # this project's traffic level.
+    # Two simultaneous misses for one CIK both fetch and both write identical payloads. 
+    # Locking that away is not worth the complexity at this traffic level.
     http_client = request.app.state.edgar_client
     metadata, companyfacts = await asyncio.gather(
         edgar.fetch_metadata(cik_10, http_client),
@@ -122,41 +94,25 @@ async def resolve_financials(request: Request, cik_10: str) -> FinancialsRespons
     )
 
 
-# ---------------------------------------------------------------------------
-# Internal: orchestrate extraction + multiples
-# ---------------------------------------------------------------------------
-
-
 async def _build_response(
     company_meta: CompanyMeta,
     companyfacts: dict,
     cached_at: datetime,
 ) -> FinancialsResponse:
     """
-    Async. Orchestrate XBRL extraction (Phase 2) and multiples (Phase 3).
+    Run extraction, then multiples, for one companyfacts payload.
 
-    _build_response is async because xbrl.extract_ttm_periods is async
-    (it runs concurrent price fetches via asyncio.gather internally).
-    It is awaited directly - not dispatched to a thread - because the
-    extraction work is I/O-bound (price fetches), not CPU-bound.
-
-    Extraction (Phase 2):
-      - Any exception propagates as HTTP 500 internal_error (PHASE_1_SPEC §2.2).
-        The legitimate-empty case (no anchors) returns periods=[] with 200
-        from inside extract_ttm_periods itself.
-
-    Multiples (Phase 3):
-      - Any exception per period -> logged, that period's multiples are
-        empty, extraction data is preserved.
+    Async because extract_ttm_periods runs concurrent price fetches. It is
+    awaited directly rather than dispatched to a thread, since the work is
+    I/O-bound. An extraction failure propagates as a 500, while a multiples
+    failure costs only that period's multiples and never its extracted data.
     """
-    # --- Phase 2: XBRL extraction + concurrent price fetches ---
     extracted_periods = await xbrl.extract_ttm_periods(
         companyfacts,
         ticker=company_meta.ticker,
         is_capital_intensive=company_meta.is_capital_intensive,
     )
 
-    # --- Phase 3: multiples computation ---
     periods: list[TTMPeriod] = []
     for ef in extracted_periods:
         if ef.period_end is None:
@@ -174,10 +130,6 @@ async def _build_response(
                 ef.period_end,
             )
 
-        # Collect per-multiple warnings from Phase 3.
-        # Iterate the seven known MultipleSet fields explicitly - using vars() or
-        # model_dump() on a Pydantic v2 model includes internal state keys and
-        # returns plain dicts respectively, both of which break .warnings access.
         multiples_warnings = [
             w
             for field_name in _MULTIPLE_FIELDS
@@ -192,11 +144,8 @@ async def _build_response(
                 multiples=multiples_set,
                 ev_components=ev_components,
                 extracted=ef,
-                # warnings = deduped union of all extraction-layer warnings (XBRL
-                # extraction + price fetch, both attached inside extract_ttm_periods)
-                # and all per-multiple warnings from Phase 3. Dedup is applied here
-                # so that ev_debt_missing (which Phase 3 attaches to every EV-based
-                # multiple) collapses to a single warning in the response.
+                # Dedup here is what collapses ev_debt_missing, which multiples.py
+                # attaches to every EV-based multiple, into one response warning.
                 warnings=dedup_warnings(ef.warnings + multiples_warnings),
             )
         )

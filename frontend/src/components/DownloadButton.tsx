@@ -9,9 +9,7 @@ interface DownloadButtonProps {
 }
 
 /**
- * Triggers the Excel export. The backend endpoint currently returns 501 (export
- * lands in a later backend task), so a failed attempt surfaces a friendly
- * "not available yet" tooltip rather than an error page.
+ * Triggers the Excel export.
  */
 export function DownloadButton({ cik10, ticker }: DownloadButtonProps) {
   const exportMutation = useExport()

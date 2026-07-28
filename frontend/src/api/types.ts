@@ -1,12 +1,8 @@
 /**
  * TypeScript mirror of the backend Pydantic contract.
  *
- * Serialization facts (verified against a live response - see PHASE_4_SPEC §2.4):
- *  - Pydantic v2 serializes Decimal fields as JSON *strings* (e.g. "8.26",
- *    "451442000000"). `client.ts:coerceDecimals` converts them back to numbers
- *    at the boundary, so every money/ratio field is typed `number | null` here.
- *    These are final, backend-computed display values - no client-side decimal
- *    math is needed.
+ * Serialization facts (verified against a live response - see PHASE_4_SPEC §1):
+ *  - These are final, backend-computed display values - no client-side decimal math is needed.
  *  - `date` / `datetime` serialize as ISO-8601 *strings* and are preserved.
  *  - `null` means "data unavailable" - distinct from 0 or a valid negative.
  *
@@ -155,6 +151,7 @@ export interface EVComponents {
 export interface TTMPeriod {
   filing_date: string | null
   period_end: string
+  label: string
   price: number | null
   multiples: MultipleSet
   ev_components: EVComponents

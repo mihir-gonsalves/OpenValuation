@@ -3,8 +3,7 @@ import { Loader2 } from 'lucide-react'
 
 /**
  * Fetch spinner. After a few seconds it explains the likely cause of a long
- * wait - the backend runs on Render's free tier and cold-starts in ~30-50s -
- * so the delay reads as expected rather than broken.
+ * wait - so the delay reads as expected rather than broken.
  */
 export function LoadingState() {
   const [slow, setSlow] = useState(false)

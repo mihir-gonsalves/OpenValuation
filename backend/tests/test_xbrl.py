@@ -260,7 +260,7 @@ class TestCapexExtraction:
     def test_crct_capex_missing(self, crct):
         assert _extract_capex(_gaap(crct), date(2026, 3, 31), date(2026, 1, 1)).value is None
 
-    def test_negative_capex_sign_normalised(self):
+    def test_negative_capex_sign_normalized(self):
         gaap = {
             "PaymentsToAcquirePropertyPlantAndEquipment": {
                 "units": {"USD": [

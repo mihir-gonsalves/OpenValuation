@@ -4,12 +4,8 @@ POST /api/search
 
 Resolves a company name or ticker to up to five CIK candidates.
 
-Design constraints:
-  - Search queries never call EDGAR or any per-query external service, matching runs
-    entirely against the in-memory index. The only network activity on the search path
-    is the index refresh, which runs at most once per 24 hours.
-  - SIC and exchange are NOT returned here, retrieved only after company selection
-    via GET /api/financials/{cik_10}.
+Matching runs entirely against the in-memory index. The only network activity on
+this path is the index refresh, at most once per 24 hours.
 """
 
 from __future__ import annotations
@@ -37,20 +33,12 @@ router = APIRouter()
 )
 async def search(body: SearchRequest, request: Request) -> SearchResponse:
     """
-    Search the in-memory company index for companies matching `body.query`.
-
-    The index is loaded from SEC company_tickers.json at startup and refreshed
-    lazily: if the index is older than 24 hours when a search request arrives,
-    it is refreshed before results are returned.
+    Search the in-memory index, refreshing it first if it is over 24 hours old.
     """
     company_index = request.app.state.company_index
     await company_index.maybe_refresh()
     results = company_index.search(body.query)
 
-    logger.info(
-        "search query=%r -> %d result(s).",
-        body.query,
-        len(results),
-    )
+    logger.info("search query=%r -> %d result(s).", body.query, len(results))
 
     return SearchResponse(results=results)

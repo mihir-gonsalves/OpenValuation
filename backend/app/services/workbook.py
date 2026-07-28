@@ -1,33 +1,19 @@
 # backend/app/services/workbook.py
 """
-Excel workbook builder - Phase 4.
+Excel workbook builder.
 
-Turns a computed `FinancialsResponse` into a downloadable `.xlsx` whose every
-result is a live formula, never a hardcoded number.  Editing any reported input
-recomputes that period's market cap, enterprise value, and seven multiples on the
-spot - the workbook is the audit trail *and* a scratchpad.
+Turns a computed `FinancialsResponse` into an `.xlsx` whose every result is a
+live formula rather than a hardcoded number, so editing any reported input
+recomputes that period on the spot. The workbook is the audit trail and a
+scratchpad at once, and that single decision drives the whole layout.
 
-Figures are quoted "USD (values in thousands, except per share)".  Multiples are 
-unchanged - each is a ratio of two thousands-scaled figures. See `_SCALE`.
+A Summary sheet carries the metadata and a seven-multiple matrix whose cells are
+cross-sheet references, and each period sheet stacks Inputs, Calculations,
+Multiples, and Notes. The multiple formulas reproduce the backend guards, so a
+fired guard yields the same "-" the API returns.
 
-Layout (chosen so the reader is never staring at a wall of numbers):
-
-  * `Summary`           - Company metadata, valuation metrics, a seven multiple 
-                          matrix across every period, and formula-based links 
-                          into each period sheet.
-  * `{period_end}`      - One sheet per TTM period. Three stacked blocks:
-        Inputs            - Every reported XBRL value with its tag, fallback status,
-                            and unit.
-        Calculations      - Market Cap and the Enterprise Value buildup as formulas
-                            referencing the Inputs block.
-        Multiples         - The seven valuation multiples as formulas, each reproducing
-                            the backend guards (missing data, near-zero denominator,
-                            negative book value / FCF) so an edit yields the same N/A
-                            the backend would.
-        Notes             - The period's data-quality warnings.
-
-The financial semantics reproduced by the formulas are authoritative in
-`README.md` / `services/multiples.py`, this module only mirrors them for Excel.
+Dollar figures are scaled to thousands (`_SCALE`) while price and EPS are not.
+Multiples need no adjustment, since the scale cancels in a ratio.
 """
 
 from __future__ import annotations
@@ -81,15 +67,11 @@ _WRAP = Alignment(vertical="top", wrap_text=True)
 _DIVIDER_BORDER = Border(bottom=Side(style="thin", color=_INK))
 
 # ---------------------------------------------------------------------------
-# Input groups: (group header, [(display label, ExtractedFinancials attr,
-#                                audit concept, format), ...])
+# Input groups: (group header, [(label, ExtractedFinancials attr, audit concept, format), ...])
 #
-# The audit concept keys mirror the names xbrl.py assigns to each AuditEntry.
-# Order matches the audit list in xbrl.py: market header (price/shares/EPS),
-# income statement -> cash flow -> balance sheet.
-#
-# The debt/cash items mirror the EV buildup order (see compute_enterprise_value
-# and the frontend EVBreakdown) so the schedule reconciles line-by-line into the EV bridge.
+# Concept keys mirror the names xbrl.py gives each AuditEntry, and the order
+# follows the audit list. The debt and cash items follow the EV buildup order so
+# the schedule reconciles line by line into the bridge.
 # ---------------------------------------------------------------------------
 
 _INPUT_GROUPS: list[tuple[str, list[tuple[str, str, str | None, str]]]] = [
@@ -147,20 +129,18 @@ _SUMMARY_ROWS: list[tuple[str, str, str] | None] = [
 
 def build_workbook(response: FinancialsResponse) -> bytes:
     """
-    Build and return a `.xlsx` workbook as raw bytes, ready to stream as a
-    binary HTTP response.
+    Build the `.xlsx` as raw bytes, ready to stream.
     """
     wb = Workbook()
-    wb.remove(wb.active)  # drop the default sheet, name it manually
+    wb.remove(wb.active)  # drop the default sheet
 
     summary = wb.create_sheet("Summary")
 
-    # Build the period sheets first, collecting the cell addresses the Summary
-    # matrix will point at. Sheet order becomes Summary, then periods.
+    # Period sheets first, to collect the addresses the Summary matrix points at.
     period_refs: list[tuple[TTMPeriod, str, dict[str, str]]] = []
     used_names: set[str] = set()
     for period in response.periods:
-        name = _period_sheet_name(period.period_end, used_names)
+        name = _period_sheet_name(period.label, used_names)
         ws = wb.create_sheet(name)
         refs = _build_period_sheet(ws, period)
         period_refs.append((period, name, refs))
@@ -219,7 +199,6 @@ def _build_summary(
     ws.row_dimensions[row].height = 26
     row += 2
 
-    # Standard color-coding key.
     ws.cell(row=row, column=1, value="Number color key:").font = _LABEL_FONT
     ws.cell(row=row, column=2, value="blue = input").font = _INPUT_FONT
     ws.cell(row=row + 1, column=2, value="black = formula")
@@ -273,9 +252,8 @@ def _build_summary(
 
 def _build_period_sheet(ws: Worksheet, period: TTMPeriod) -> dict[str, str]:
     """
-    Write one period sheet and return the cell addresses the Summary needs:
-    the price / shares input cells, the market-cap and EV formula cells, and the
-    seven multiple formula cells (keyed by MultipleSet field name).
+    Write one period sheet and return the addresses the Summary needs: the price
+    and shares inputs, market cap and EV, and the seven multiples.
     """
     ws.sheet_view.showGridLines = False
     ef = period.extracted
@@ -283,7 +261,7 @@ def _build_period_sheet(ws: Worksheet, period: TTMPeriod) -> dict[str, str]:
 
     ws["A1"] = _internal_link("Summary", "A1", "← Back to Summary")
     ws["A1"].font = _LINK_FONT
-    ws["A2"] = f'="{_quarter_label(period.period_end)} - " & Summary!B3'
+    ws["A2"] = f'="{period.label} - " & Summary!B3'
     ws["A2"].font = _SECTION_FONT
 
     _kv(ws, 4, "Quarter End", period.period_end, _DATE)
@@ -308,7 +286,7 @@ def _build_period_sheet(ws: Worksheet, period: TTMPeriod) -> dict[str, str]:
     r = 11
     for group_idx, (group_title, specs) in enumerate(_INPUT_GROUPS):
         if group_idx > 0:
-            r += 1  # blank spacer row between groups
+            r += 1  # spacer between groups
         _table_divider(ws, r, group_title)
         r += 1
         for label, attr, concept, fmt in specs:
@@ -428,10 +406,10 @@ def _build_period_sheet(ws: Worksheet, period: TTMPeriod) -> dict[str, str]:
             f'=IF(OR({mc}="-",{eq}=""),"-",IF({eq}<0,"-",IF(ABS({eq})<0.01,"-",{mc}/{eq})))',
         ),
     ]
-    for key, label, formula, definition in multiple_rows:
+    for key, label, definition, formula in multiple_rows:
         ws.cell(row=r, column=1, value=label).font = _LABEL_FONT
-        ws.cell(row=r, column=2, value=formula).font = _NOTE_FONT
-        cell = ws.cell(row=r, column=3, value=definition)
+        ws.cell(row=r, column=2, value=definition).font = _NOTE_FONT
+        cell = ws.cell(row=r, column=3, value=formula)
         cell.number_format = _MULT
         cell.alignment = _RIGHT
         refs[key] = cell.coordinate
@@ -464,14 +442,15 @@ def _build_period_sheet(ws: Worksheet, period: TTMPeriod) -> dict[str, str]:
 
 
 def _num(x: Decimal | None) -> float | None:
-    """Decimal -> float for the cell. Excel stores doubles, this matches it."""
+    """
+    Decimal -> float, matching what Excel stores.
+    """
     return float(x) if x is not None else None
 
 
 def _datetime_or(x):
     """
-    openpyxl accepts date/datetime directly, but Excel rejects tz-aware
-    datetimes. API's timestamps are UTC, drop the tzinfo (label stays "UTC").
+    Excel rejects tz-aware datetimes. The API's timestamps are UTC, so drop the tzinfo and keep the label.
     """
     if x is None:
         return "-"
@@ -522,20 +501,18 @@ def _apply_header(cell) -> None:
 
 
 def _internal_link(sheet: str, cell: str, label: str) -> str:
-    """A HYPERLINK formula to another sheet in this workbook."""
+    """
+    A HYPERLINK formula to another sheet in this workbook.
+    """
     label = label.replace('"', "'")
     return f'=HYPERLINK("#\'{sheet}\'!{cell}","{label}")'
 
 
-def _quarter_label(period_end: date) -> str:
-    """date -> 'Q1 2026', the calendar quarter of the period end."""
-    quarter = (period_end.month - 1) // 3 + 1
-    return f"Q{quarter} {period_end.year}"
-
-
-def _period_sheet_name(period_end: date, used: set[str]) -> str:
-    """'Q1 2026', truncated to Excel's 31-char limit and de-duplicated."""
-    base = f"{_quarter_label(period_end)}"[:31]
+def _period_sheet_name(label: str, used: set[str]) -> str:
+    """
+    A period's label, truncated to Excel's 31-char limit and de-duplicated.
+    """
+    base = label[:31]
     name, i = base, 2
     while name in used:
         suffix = f" ({i})"

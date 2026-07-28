@@ -2,16 +2,7 @@
 """
 GET /api/export/{cik_10}
 
-Streams a .xlsx workbook containing valuation multiples, raw XBRL inputs,
-and live Excel formulas for full auditability.
-
-Three sheets (Phase 4):
-  1. Summary        - Final multiples, company metadata, timestamp, warnings.
-  2. Raw Financials - Extracted XBRL values with tags, fallback status, unit, context.
-  3. Calculations   - Live Excel formulas referencing Raw Financials. No hardcoded values.
-
-Phase 1: returns HTTP 501 (not yet implemented). Full Excel generation is Phase 4.  
-Phase 4: calls workbook.build_workbook(response) and streams the binary result.
+Streams the .xlsx workbook built by services/workbook.py.
 """
 
 from __future__ import annotations
@@ -41,12 +32,12 @@ _XLSX_MEDIA_TYPE = "application/vnd.openxmlformats-officedocument.spreadsheetml.
     ),
     responses={
         200: {
-            "content": {
-                "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet": {}
-            },
+            "content": {"application/vnd.openxmlformats-officedocument.spreadsheetml.sheet": {}},
             "description": "Excel workbook (.xlsx) binary stream.",
         },
-        404: {"description": "CIK not found or no data available."},
+        404: {
+            "description": "CIK not found or no data available."
+        },
     },
 )
 async def export_workbook(
@@ -59,17 +50,13 @@ async def export_workbook(
     ),
 ) -> Response:
     """
-    Stream a .xlsx workbook for the given CIK.
-
-    Reuses the financials cache-or-fetch path (resolve_financials) so the export
-    reflects exactly what the results table shows, then serialises it to a
-    formula-driven workbook. EDGAR/extraction failures propagate as the same
-    structured HTTPExceptions the financials endpoint raises.
+    Reuses the financials cache-or-fetch path, so the export matches what the
+    results table shows and failures surface as the same structured HTTPExceptions.
     """
     response = await resolve_financials(request, cik_10)
     xlsx_bytes = workbook.build_workbook(response)
-
     filename = f"openvaluation_{cik_10}.xlsx"
+    
     return Response(
         content=xlsx_bytes,
         media_type=_XLSX_MEDIA_TYPE,

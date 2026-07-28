@@ -146,9 +146,7 @@ def get(cik_10: str) -> CacheEntry | None:
 
 The `MAX_CACHE_ENTRIES = 8` cap bounds memory use. When the limit is reached, the oldest entry (by `cached_at`) is evicted before the new one is inserted.
 
-The cache stores raw **EDGAR payloads** (`companyfacts` + `CompanyMeta`), not computed results.
-This means Phase 2/3 logic always re-runs from the cached payload and never needs cache
-invalidation when computation changes. See `models/cache.py` for the exact `CacheEntry` shape.
+The cache stores raw **EDGAR payloads** (`companyfacts` + `CompanyMeta`), not computed results. This means Phase 2/3 logic always re-runs from the cached payload and never needs cache invalidation when computation changes. See `models/cache.py` for the exact `CacheEntry` shape.
 
 **Why CIK, not ticker?** 
 
@@ -162,6 +160,23 @@ All managed Redis options introduce cost. For expected usage (likely low), in-pr
 
 Render's free tier spins down after 15 minutes of inactivity. Every cold start empties the cache. The first request for each company after a cold start pays the full EDGAR fetch cost (~1–3 seconds).  
 This is disclosed in the README and the UI.
+
+### Render Memory Limits
+
+Render's free tier caps at **512 MB RSS**. 
+
+Both the cache and the company index live in the server process's RAM (never on disk), so the budget is:
+
+| Component | Footprint |
+|---|---|
+| Python baseline (uvicorn + FastAPI + pydantic + openpyxl + httpx) | ~100–150 MB |
+| Company index (~10k entries × 4 short strings) | ~3–5 MB |
+| Cache: `MAX_CACHE_ENTRIES` (8) × ~19 MB parsed worst case | ~150 MB |
+| Transient spike parsing one large fetch | ~30–40 MB peak |
+
+Steady-state worst case ≈ **300 MB**, peak ≈ **350 MB**. 
+
+The cache is the only meaningful variable, the index is essentially a rounding error and is not worth optimizing. Caveat: Python does not reliably return freed memory to the OS, so RSS creeps toward its high-water mark. If production RSS (visible in Render's Metrics tab) approaches the limit, lower `MAX_CACHE_ENTRIES` in `app/cache.py`.
 
 
 

@@ -5,7 +5,7 @@ Tests for app/services/price.py
 yfinance is mocked via unittest.mock.patch - no real network calls.
 
 Coverage:
-  - Ticker normalisation: BRK.A -> BRK-A
+  - Ticker normalization: BRK.A -> BRK-A
   - Successful price fetch -> Decimal returned, rounded to 4dp
   - Empty DataFrame -> None returned
   - Non-positive price -> None returned
@@ -31,27 +31,27 @@ from app.services.price import (
     _download_window_sync,
     _fetch_price_sync,
     _first_close_after,
-    _normalise_ticker,
+    _normalize_ticker,
     get_price,
     get_prices,
 )
 
 
 # ---------------------------------------------------------------------------
-# Ticker normalisation
+# Ticker normalization
 # ---------------------------------------------------------------------------
 
 
-def test_normalise_ticker_dot_to_dash():
-    assert _normalise_ticker("BRK.A") == "BRK-A"
+def test_normalize_ticker_dot_to_dash():
+    assert _normalize_ticker("BRK.A") == "BRK-A"
 
 
-def test_normalise_ticker_no_change():
-    assert _normalise_ticker("AAPL") == "AAPL"
+def test_normalize_ticker_no_change():
+    assert _normalize_ticker("AAPL") == "AAPL"
 
 
-def test_normalise_ticker_multiple_dots():
-    assert _normalise_ticker("A.B.C") == "A-B-C"
+def test_normalize_ticker_multiple_dots():
+    assert _normalize_ticker("A.B.C") == "A-B-C"
 
 
 # ---------------------------------------------------------------------------
@@ -176,8 +176,8 @@ async def test_get_price_timeout_returns_none():
 
 
 @pytest.mark.asyncio
-async def test_get_price_normalises_ticker_before_call():
-    """Verify BRK.A is normalised to BRK-A before being passed to _download_window_sync."""
+async def test_get_price_normalizes_ticker_before_call():
+    """Verify BRK.A is normalized to BRK-A before being passed to _download_window_sync."""
     captured = {}
 
     def _fake_download(ticker, start, end):
@@ -252,8 +252,8 @@ async def test_get_prices_download_failure_returns_all_none():
 
 
 @pytest.mark.asyncio
-async def test_get_prices_normalises_ticker():
-    """Batch fetch normalises the ticker the same way as get_price."""
+async def test_get_prices_normalizes_ticker():
+    """Batch fetch normalizes the ticker the same way as get_price."""
     captured = {}
 
     def _fake_download(ticker, start, end):

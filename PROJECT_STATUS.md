@@ -1,7 +1,7 @@
 # OpenValuation: Project Status
 
 **Last Updated:** 2026-06-14  
-**Current Phase:** Phase 4 - Frontend and Excel (Phase 3 complete).
+**Current Phase:** Phase 5 - Deployment.
 
 ## Overview
 
@@ -281,7 +281,7 @@ Excel:
 
 ### Phase 5: Deployment
 
-Status: Not started
+Status: In progress
 
 * Deploy backend on Render
 * Deploy frontend on Vercel

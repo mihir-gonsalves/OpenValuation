@@ -2,18 +2,9 @@
 """
 Cache models and TTL logic for the in-memory EDGAR payload cache.
 
-Design:
-  - Cache stores raw EDGAR payloads (companyfacts + parsed metadata), not computed results.
-  - The expensive operation is the EDGAR fetch (5-10 MB companyfacts blob).
-  - Computation (XBRL extraction, TTM bridge, multiples) is fast and runs on every
-    request from the cached payload. This ensures Phase 2 and Phase 3 logic is always
-    applied without requiring cache invalidation.
-  - TTL: 24 hours. Keyed by CIK_10 (stable, unambiguous EDGAR identifier).
-  - Cache is cleared on Render cold starts. This behaviour is disclosed in the UI.
-
-Cache key design:
-  - Always CIK_10 (10-digit zero-padded string), never ticker.
-  - Tickers can change on renames or exchange moves, CIK never does.
+Raw EDGAR payloads are cached, not computed results. The expensive step is the
+fetch (a 5-10 MB companyfacts blob), while extraction and multiples are fast and
+re-run on every request, so changing computation never needs an invalidation.
 """
 
 from __future__ import annotations
@@ -25,47 +16,21 @@ from pydantic import BaseModel, Field
 
 from app.models.company import CompanyMeta
 
-# ---------------------------------------------------------------------------
-# TTL constant (single source of truth)
-# ---------------------------------------------------------------------------
-
-CACHE_TTL_SECONDS: int = 24 * 3600  # 24 hours
-
-
-# ---------------------------------------------------------------------------
-# Payload stored inside each cache entry
-# ---------------------------------------------------------------------------
+CACHE_TTL_SECONDS: int = 24 * 3600
 
 
 class EDGARPayload(BaseModel):
-    """
-    Raw EDGAR data fetched for a single company.  
-    Stored verbatim - no transformation applied at cache-write time.
-    """
+    """Raw EDGAR data for one company, stored verbatim."""
 
     companyfacts: dict[str, Any]
-    """
-    Full response from data.sec.gov/api/xbrl/companyfacts/CIK{CIK_10}.json.  
-    Typically 5-10 MB. Contains the complete XBRL fact history for the company.
-    """
+    """Full companyfacts response: the complete XBRL fact history."""
 
     company_meta: CompanyMeta
-    """
-    Parsed company metadata derived from data.sec.gov/submissions/CIK{CIK_10}.json 
-    at fetch time. Stored here so it can be cheaply returned on cache hits without re-parsing.
-    """
-
-
-# ---------------------------------------------------------------------------
-# Cache entry (payload + timestamp)
-# ---------------------------------------------------------------------------
+    """Parsed company metadata derived from data.sec.gov/submissions/CIK{CIK_10}.json."""
 
 
 class CacheEntry(BaseModel):
-    """
-    A single entry in the in-memory cache.  
-    Wraps an EDGARPayload with a UTC timestamp for TTL enforcement.
-    """
+    """An EDGARPayload plus the UTC timestamp TTL is measured against."""
 
     payload: EDGARPayload
     cached_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))

@@ -14,7 +14,7 @@ Coverage:
   - CIK deduplication (same CIK appears only once in results)
   - Empty query returns empty list
   - Whitespace-only query returns empty list
-  - CIK_10 normalisation (integers -> zero-padded 10-digit strings)
+  - CIK_10 normalization (integers -> zero-padded 10-digit strings)
   - Cooldown: failed refresh does not trigger a second network call within cooldown window
 """
 
@@ -28,7 +28,7 @@ import pytest
 from app.services.company_index import (
     CompanyIndex, _IndexEntry, MAX_RESULTS, REFRESH_FAILURE_COOLDOWN_SECONDS,
 )
-from app.models.company import normalise_cik
+from app.models.company import normalize_cik
 
 
 # ---------------------------------------------------------------------------
@@ -155,7 +155,7 @@ def test_results_capped_at_max():
     # Create an index with more than MAX_RESULTS entries that all match
     entries = [
         _IndexEntry(
-            cik_10=normalise_cik(i),
+            cik_10=normalize_cik(i),
             ticker=f"FOO{i}",
             name=f"FooBar Company {i}",
             name_lower=f"foobar company {i}",
@@ -184,24 +184,24 @@ def test_cik_deduplication():
 
 
 # ---------------------------------------------------------------------------
-# CIK normalisation
+# CIK normalization
 # ---------------------------------------------------------------------------
 
 
-def test_normalise_cik_from_int():
-    assert normalise_cik(320193) == "0000320193"
+def test_normalize_cik_from_int():
+    assert normalize_cik(320193) == "0000320193"
 
 
-def test_normalise_cik_from_string():
-    assert normalise_cik("320193") == "0000320193"
+def test_normalize_cik_from_string():
+    assert normalize_cik("320193") == "0000320193"
 
 
-def test_normalise_cik_already_padded():
-    assert normalise_cik("0000320193") == "0000320193"
+def test_normalize_cik_already_padded():
+    assert normalize_cik("0000320193") == "0000320193"
 
 
-def test_normalise_cik_large_value():
-    assert normalise_cik(1234567890) == "1234567890"
+def test_normalize_cik_large_value():
+    assert normalize_cik(1234567890) == "1234567890"
 
 
 # ---------------------------------------------------------------------------

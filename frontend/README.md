@@ -14,7 +14,7 @@ npm install
 npm run dev          # http://localhost:5173, proxies /api -> :8000 (backend must be running)
 ```
 
-## Quality gates
+## Quality Gates
 ```bash
 npm run build        # type-check + production build
 npm run typecheck    # tsc only

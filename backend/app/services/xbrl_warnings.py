@@ -1,20 +1,9 @@
 # backend/app/services/xbrl_warnings.py
 """
-Warning helpers for the XBRL extraction layer.
+Warning construction and per-period deduplication for the extraction layer.
 
-Two responsibilities:
-
-1. `_make_flow_warnings` - builds the standard warnings produced by a flow
-   concept extraction (TTM annualization + amendment usage). Called from
-   `_resolve_flow` and `_extract_eps` in xbrl.py.
-
-2. `dedup_warnings` - collapses repeated warning codes within a single
-   period into one aggregated message. Called once per period at the end of
-   `extract_ttm_periods` and in the financials router.
-
-Both functions are pure and depend only on the warning model - no XBRL data
-structures, no I/O. They live here so xbrl.py can stay focused on extraction
-logic.
+Both functions are pure and touch only the warning model, which keeps message
+wording out of the extraction logic.
 """
 
 from __future__ import annotations
@@ -23,15 +12,9 @@ from datetime import date
 
 from app.models.errors import Warning, WarningCode, warn
 
-# ---------------------------------------------------------------------------
-# Aggregation templates
-# ---------------------------------------------------------------------------
-# When the same warning code fires for several concepts in one period (e.g.
-# TTM_ANNUALIZED for Revenue, OCF, and EPS), `dedup_warnings` collapses
-# them into a single message that lists every affected concept.
-#
-# Aggregation uses Warning.concept (a structured field) rather than parsing
-# the human-readable message, so wording changes never break deduplication.
+# Codes that collapse into one message listing every affected concept. The
+# aggregation reads Warning.concept rather than parsing the message, so wording
+# changes cannot break it.
 
 _AGGREGATABLE_TEMPLATES: dict[str, str] = {
     WarningCode.TTM_ANNUALIZED.value: (
@@ -43,11 +26,6 @@ _AGGREGATABLE_TEMPLATES: dict[str, str] = {
 }
 
 
-# ---------------------------------------------------------------------------
-# Flow warning builder
-# ---------------------------------------------------------------------------
-
-
 def _make_flow_warnings(
     tag: str,
     fiscal_year_start: date,
@@ -57,17 +35,12 @@ def _make_flow_warnings(
     concept_name: str,
 ) -> list[Warning]:
     """
-    Build the TTM_ANNUALIZED and AMENDMENT_EXISTS warnings for a flow concept.
+    The TTM_ANNUALIZED and AMENDMENT_EXISTS warnings for a flow concept.
 
-    Centralised here so future wording changes happen once. All flow extraction
-    paths (revenue, EPS, operating income, ...) share the same message format
-    by routing through this function.
-
-    Known gap: only the current-YTD key `(fiscal_year_start, period_end)` is
-    checked against `amendment_keys`. Prior-year components consumed by the
-    TTM bridge (prior-FY annual, prior-YTD) are silently accepted even when
-    their source is an amendment. Closing this requires `_get_ttm_value` to
-    return the keys it consulted - deferred to a future phase.
+    Known gap: only the current-YTD key is checked against `amendment_keys`, so
+    the bridge's two prior-year components are accepted even when their source
+    was an amendment. Closing it needs `_get_ttm_value` to return the keys it
+    consulted. Deferred.
     """
     warnings: list[Warning] = []
 
@@ -90,38 +63,22 @@ def _make_flow_warnings(
     return warnings
 
 
-# ---------------------------------------------------------------------------
-# Per-period warning deduplication
-# ---------------------------------------------------------------------------
-
-
 def dedup_warnings(warnings: list[Warning]) -> list[Warning]:
     """
-    Collapse a period's warnings to one per code, preserving first-occurrence order.
+    Collapse a period's warnings to one per code, in first-occurrence order.
 
-    For aggregatable codes (TTM_ANNUALIZED, AMENDMENT_EXISTS), concept names
-    from every occurrence are merged into a single message using Warning.concept.
-    All other codes keep their first occurrence verbatim and discard later duplicates.
+    The aggregatable codes merge their concept names into one message, so
+    TTM_ANNUALIZED firing for Revenue, OCF, and EPS reads as a single line
+    naming all three. Every other code keeps its first occurrence verbatim.
 
-    Example. If TTM_ANNUALIZED fires for Revenue, OCF, and EPS in one period,
-    the output reads:
-
-        "Prior-year data unavailable for Revenue, Operating Cash Flow, EPS.
-         TTM annualized from current YTD."
-
-    rather than showing the same warning three times with different concept names.
-
-    Note on the comparison key: `Warning.model_config` sets
-    `use_enum_values=True`, so `w.code` is the underlying string (e.g.
-    `"ttm_annualized"`), not the WarningCode enum member. The dict keys are
-    therefore strings and is wrap with `WarningCode(code)` when reconstructing
-    a Warning for the aggregated output.
+    `use_enum_values=True` means `w.code` is already the underlying string, so
+    the keys here are strings and get re-wrapped for the aggregated output.
     """
     first_seen: dict[str, Warning] = {}
     aggregated_names: dict[str, list[str]] = {}
 
     for w in warnings:
-        code = w.code  # already a str - see docstring note
+        code = w.code
         if code not in first_seen:
             first_seen[code] = w
         if code in _AGGREGATABLE_TEMPLATES and w.concept is not None:
