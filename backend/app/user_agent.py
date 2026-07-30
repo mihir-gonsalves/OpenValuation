@@ -18,7 +18,7 @@ def sec_headers() -> dict[str, str]:
     """
     user_agent = os.getenv(
         "EDGAR_USER_AGENT",
-        "OpenValuation/0.1.0 email@domain.com", # will update later
+        "OpenValuation/0.1.0 email@domain.com", # placeholder
     )
     return {
         "User-Agent": user_agent,

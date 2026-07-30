@@ -87,7 +87,7 @@ The taxonomy check is a separate step after the fetch, and it distinguishes an I
 
 It returns `status`, `version`, `cache.stats()`, and `company_index_size`. The frontend's landing page polls it to decide whether the backend is cold, so it has to stay cheap and dependency-free: it reads process-local state and makes no outbound call. The cache and index numbers are there because they are the two pieces of state a restart silently resets.
 
-CORS allows `GET` and `POST` with `Content-Type`, origins from `ALLOWED_ORIGINS`, and `allow_credentials=False`, since there are no accounts, no cookies, and nothing to authenticate. `ALLOWED_ORIGINS` and `EDGAR_USER_AGENT` both carry hardcoded dev fallbacks marked `# will update later`. The SEC requires the User-Agent on every request, so the fallback keeps a fresh clone working while being obviously wrong in production.
+CORS allows `GET` and `POST` with `Content-Type`, origins from `ALLOWED_ORIGINS`, and `allow_credentials=False`, since there are no accounts, no cookies, and nothing to authenticate. `ALLOWED_ORIGINS` and `EDGAR_USER_AGENT` both carry hardcoded dev fallbacks marked `# placeholder`. The SEC requires the User-Agent on every request, so the fallback keeps a fresh clone working while being obviously wrong in production.
 
 ## 7. Lifespan owns exactly one resource
 

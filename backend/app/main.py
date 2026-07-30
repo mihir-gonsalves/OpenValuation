@@ -139,7 +139,7 @@ async def validation_exception_handler(request: Request, exc: RequestValidationE
 # CORS middleware
 # ---------------------------------------------------------------------------
 
-_raw_origins = os.getenv("ALLOWED_ORIGINS", "http://localhost:5173") # will update later
+_raw_origins = os.getenv("ALLOWED_ORIGINS", "http://localhost:5173") # placeholder
 ALLOWED_ORIGINS: list[str] = [o.strip() for o in _raw_origins.split(",") if o.strip()]
 
 app.add_middleware(

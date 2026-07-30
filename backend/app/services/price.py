@@ -17,7 +17,7 @@ trading days even across the Christmas to New Year closure.
 
 **Transient failures are retried.** Every multiple is price-dependent, so an
 empty price map blanks the entire table rather than degrading part of it. A
-slow or rate-limited Yahoo response is therefore retried with backoff instead
+slow or rate-limited response is therefore retried with backoff instead
 of being turned into N/A on the first miss. A response that simply carries no
 rows is not retried - that means the ticker has no data in the window, which
 another attempt cannot change.
@@ -47,10 +47,7 @@ PRICE_FETCH_ATTEMPTS = 2
 """Attempts per batch download, counting the first."""
 
 PRICE_RETRY_BACKOFF_SECONDS = 2.0
-"""
-Delay before the retry. These failures clear in seconds - a manual refresh
-shortly after one is enough - so a second attempt covers them.
-"""
+"""Delay before the retry."""
 
 
 class PriceFetchError(Exception):
@@ -101,11 +98,11 @@ async def get_prices(ticker: str, filing_dates: list[date]) -> dict[date, Decima
     Batch variant of get_price: one download covering every filing date.
 
     A single window spanning all the dates replaces up to 12 concurrent
-    downloads, which is what keeps Yahoo from rate-limiting the request.
+    downloads, which is what keeps yfinance from rate-limiting the request.
     Per-date semantics are unchanged.
 
     A timeout or a PriceFetchError is retried up to PRICE_FETCH_ATTEMPTS times.
-    Only an exhausted retry budget, or a response with no usable rows, returns all-None.
+    Only an exhausted retry budget, or a response with no usable prices, returns all-None.
     """
     if not filing_dates:
         return {}
@@ -120,7 +117,7 @@ async def get_prices(ticker: str, filing_dates: list[date]) -> dict[date, Decima
                 asyncio.to_thread(_download_window_sync, normalized, window_start, window_end),
                 timeout=PRICE_FETCH_TIMEOUT_SECONDS,
             )
-            # A None df here means Yahoo answered with nothing, so stop.
+            # A None df here means yfinance answered with nothing, so stop.
             break
         except (asyncio.TimeoutError, PriceFetchError) as exc:
             # Logged at each attempt because the cause differs per attempt, and a

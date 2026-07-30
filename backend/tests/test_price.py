@@ -328,7 +328,7 @@ async def test_get_prices_timeout_returns_all_none():
              patch("app.services.price.PRICE_RETRY_BACKOFF_SECONDS", 0.0):
             result = await get_prices("AAPL", filing_dates)
         assert result == {date(2024, 1, 1): None, date(2024, 4, 1): None}
-        # A timeout is retried too - a slow Yahoo is the case this exists for.
+        # A timeout is retried too - a slow yfinance is the case this exists for.
         assert mock_dl.call_count == 2
     finally:
         release.set()

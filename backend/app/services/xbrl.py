@@ -994,7 +994,7 @@ async def extract_ttm_periods(
     ]
 
     # --- Step 5: one batch price download spanning every anchor date ---
-    # Replaces up to 12 simultaneous requests, which Yahoo rate-limits.
+    # Replaces up to 12 simultaneous requests, which yfinance rate-limits.
     if ticker:
         fetched = await price_svc.get_prices(ticker, [a.filed for a in anchors])
         for ef, anchor in zip(periods, anchors):

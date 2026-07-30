@@ -9,7 +9,7 @@ export function LoadingState() {
   const [slow, setSlow] = useState(false)
 
   useEffect(() => {
-    const id = setTimeout(() => setSlow(true), 8000)
+    const id = setTimeout(() => setSlow(true), 6000)
     return () => clearTimeout(id)
   }, [])
 
@@ -23,7 +23,7 @@ export function LoadingState() {
       <p className="text-foreground text-sm font-medium">Fetching filings, computing multiples...</p>
       {slow && (
         <p className="max-w-sm text-muted-foreground text-xs leading-relaxed">
-          The server may be waking from idle. A cold start can take 30-50 seconds. It will respond shortly.
+          The server may be waking from idle or yfinance may be slow. A cold start can take 30-50 seconds. It will respond shortly.
         </p>
       )}
     </div>
