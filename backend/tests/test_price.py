@@ -9,10 +9,12 @@ Coverage:
   - Successful price fetch -> Decimal returned, rounded to 4dp
   - Empty DataFrame -> None returned
   - Non-positive price -> None returned
-  - yfinance exception -> None returned (price_unavailable surfaced by caller)
+  - yfinance exception -> PriceFetchError (get_price still degrades to None)
   - Fetch timeout -> None returned
   - get_prices batch: single download, one result per filing date
-  - get_prices batch: failure -> all-None dict
+  - get_prices batch: transient failure -> retried, succeeds on a later attempt
+  - get_prices batch: exhausted retries -> all-None dict
+  - get_prices batch: empty response -> all-None dict without retrying
   - get_prices batch: empty list -> empty dict
 """
 
@@ -28,6 +30,7 @@ import pandas as pd
 import pytest
 
 from app.services.price import (
+    PriceFetchError,
     _download_window_sync,
     _fetch_price_sync,
     _first_close_after,
@@ -141,11 +144,18 @@ def test_fetch_price_sync_negative_price_returns_none():
     assert result is None
 
 
-def test_fetch_price_sync_yfinance_exception_returns_none():
+def test_fetch_price_sync_yfinance_exception_raises():
+    """A yfinance failure is retryable, so it raises rather than reading as no-data."""
     with patch("yfinance.download", side_effect=Exception("connection refused")):
-        result = _fetch_price_sync("AAPL", date(2024, 2, 2), date(2024, 2, 16))
+        with pytest.raises(PriceFetchError):
+            _fetch_price_sync("AAPL", date(2024, 2, 2), date(2024, 2, 16))
 
-    assert result is None
+
+@pytest.mark.asyncio
+async def test_get_price_degrades_to_none_on_fetch_error():
+    """get_price keeps its never-raises contract despite _fetch_price_sync raising."""
+    with patch("yfinance.download", side_effect=Exception("connection refused")):
+        assert await get_price("AAPL", date(2024, 2, 1)) is None
 
 
 # ---------------------------------------------------------------------------
@@ -241,14 +251,51 @@ async def test_get_prices_empty_list_returns_empty_dict():
 
 
 @pytest.mark.asyncio
-async def test_get_prices_download_failure_returns_all_none():
-    """On any download failure, all dates map to None."""
+async def test_get_prices_empty_response_returns_all_none_without_retrying():
+    """An empty response is Yahoo answering 'no data', which a retry cannot change."""
     filing_dates = [date(2024, 1, 1), date(2024, 4, 1)]
 
-    with patch("app.services.price._download_window_sync", return_value=None):
+    with patch("app.services.price._download_window_sync", return_value=None) as mock_dl:
         result = await get_prices("AAPL", filing_dates)
 
     assert result == {date(2024, 1, 1): None, date(2024, 4, 1): None}
+    assert mock_dl.call_count == 1
+
+
+@pytest.mark.asyncio
+async def test_get_prices_retries_transient_failure_then_succeeds():
+    """A PriceFetchError is retried, so one bad attempt does not blank every multiple."""
+    filing_dates = [date(2024, 1, 1)]
+    good_df = pd.DataFrame({"Close": [150.0]}, index=[pd.Timestamp("2024-01-02")])
+    attempts = []
+
+    def _flaky(ticker, start, end):
+        attempts.append(ticker)
+        if len(attempts) < 2:
+            raise PriceFetchError("rate limited")
+        return good_df
+
+    with patch("app.services.price._download_window_sync", side_effect=_flaky), \
+         patch("app.services.price.PRICE_RETRY_BACKOFF_SECONDS", 0.0):
+        result = await get_prices("AAPL", filing_dates)
+
+    assert len(attempts) == 2
+    assert result[date(2024, 1, 1)] == Decimal("150.0000")
+
+
+@pytest.mark.asyncio
+async def test_get_prices_exhausted_retries_returns_all_none():
+    """After the retry budget is spent, the caller still gets a clean all-None map."""
+    filing_dates = [date(2024, 1, 1), date(2024, 4, 1)]
+
+    with patch(
+        "app.services.price._download_window_sync",
+        side_effect=PriceFetchError("rate limited"),
+    ) as mock_dl, patch("app.services.price.PRICE_RETRY_BACKOFF_SECONDS", 0.0):
+        result = await get_prices("AAPL", filing_dates)
+
+    assert result == {date(2024, 1, 1): None, date(2024, 4, 1): None}
+    assert mock_dl.call_count == 2
 
 
 @pytest.mark.asyncio
@@ -276,9 +323,12 @@ async def test_get_prices_timeout_returns_all_none():
 
     filing_dates = [date(2024, 1, 1), date(2024, 4, 1)]
     try:
-        with patch("app.services.price._download_window_sync", side_effect=_block), \
-             patch("app.services.price.PRICE_FETCH_TIMEOUT_SECONDS", 0.01):
+        with patch("app.services.price._download_window_sync", side_effect=_block) as mock_dl, \
+             patch("app.services.price.PRICE_FETCH_TIMEOUT_SECONDS", 0.01), \
+             patch("app.services.price.PRICE_RETRY_BACKOFF_SECONDS", 0.0):
             result = await get_prices("AAPL", filing_dates)
         assert result == {date(2024, 1, 1): None, date(2024, 4, 1): None}
+        # A timeout is retried too - a slow Yahoo is the case this exists for.
+        assert mock_dl.call_count == 2
     finally:
         release.set()

@@ -15,6 +15,13 @@ dividend payers, which would systematically understate older TTM multiples.
 **A 14 day window** (end-exclusive, so 13 effective) guarantees at least four
 trading days even across the Christmas to New Year closure.
 
+**Transient failures are retried.** Every multiple is price-dependent, so an
+empty price map blanks the entire table rather than degrading part of it. A
+slow or rate-limited Yahoo response is therefore retried with backoff instead
+of being turned into N/A on the first miss. A response that simply carries no
+rows is not retried - that means the ticker has no data in the window, which
+another attempt cannot change.
+
 yfinance is synchronous, so every call goes through asyncio.to_thread.
 """
 
@@ -33,8 +40,26 @@ logger = logging.getLogger(__name__)
 PRICE_WINDOW_DAYS = 14
 """Calendar days to request, starting the day after the filing date."""
 
-PRICE_FETCH_TIMEOUT_SECONDS = 15.0
-"""Seconds to wait for yfinance before giving up and returning None."""
+PRICE_FETCH_TIMEOUT_SECONDS = 20.0
+"""Seconds to wait for a single yfinance attempt before abandoning it."""
+
+PRICE_FETCH_ATTEMPTS = 2
+"""Attempts per batch download, counting the first."""
+
+PRICE_RETRY_BACKOFF_SECONDS = 2.0
+"""
+Delay before the retry. These failures clear in seconds - a manual refresh
+shortly after one is enough - so a second attempt covers them.
+"""
+
+
+class PriceFetchError(Exception):
+    """
+    yfinance could not answer: network error, rate limit, or an internal error.
+
+    Distinct from a successful response with no rows, which means the ticker has
+    no data in the window. Only this is worth retrying.
+    """
 
 
 # ---------------------------------------------------------------------------
@@ -77,22 +102,43 @@ async def get_prices(ticker: str, filing_dates: list[date]) -> dict[date, Decima
 
     A single window spanning all the dates replaces up to 12 concurrent
     downloads, which is what keeps Yahoo from rate-limiting the request.
-    Per-date semantics are unchanged. Any failure returns all-None.
+    Per-date semantics are unchanged.
+
+    A timeout or a PriceFetchError is retried up to PRICE_FETCH_ATTEMPTS times.
+    Only an exhausted retry budget, or a response with no usable rows, returns all-None.
     """
     if not filing_dates:
         return {}
     normalized = _normalize_ticker(ticker)
     window_start = min(filing_dates) + timedelta(days=1)
     window_end = max(filing_dates) + timedelta(days=PRICE_WINDOW_DAYS)
-    try:
-        df = await asyncio.wait_for(
-            asyncio.to_thread(_download_window_sync, normalized, window_start, window_end),
-            timeout=PRICE_FETCH_TIMEOUT_SECONDS,
-        )
-    except (asyncio.TimeoutError, Exception):
-        logger.warning("Batch price fetch failed for %s.", normalized)
-        return {d: None for d in filing_dates}
+
+    df = None
+    for attempt in range(1, PRICE_FETCH_ATTEMPTS + 1):
+        try:
+            df = await asyncio.wait_for(
+                asyncio.to_thread(_download_window_sync, normalized, window_start, window_end),
+                timeout=PRICE_FETCH_TIMEOUT_SECONDS,
+            )
+            # A None df here means Yahoo answered with nothing, so stop.
+            break
+        except (asyncio.TimeoutError, PriceFetchError) as exc:
+            # Logged at each attempt because the cause differs per attempt, and a
+            # single collapsed message cannot tell a timeout from a rate limit.
+            if attempt == PRICE_FETCH_ATTEMPTS:
+                logger.warning(
+                    "Batch price fetch for %s failed on final attempt %d/%d: %r.",
+                    normalized, attempt, PRICE_FETCH_ATTEMPTS, exc,
+                )
+                return {d: None for d in filing_dates}
+            logger.info(
+                "Batch price fetch for %s failed on attempt %d/%d (%r), retrying in %.0fs.",
+                normalized, attempt, PRICE_FETCH_ATTEMPTS, exc, PRICE_RETRY_BACKOFF_SECONDS,
+            )
+            await asyncio.sleep(PRICE_RETRY_BACKOFF_SECONDS)
+
     if df is None:
+        logger.warning("No price data for %s in [%s, %s).", normalized, window_start, window_end)
         return {d: None for d in filing_dates}
     return {d: _first_close_after(df, d) for d in filing_dates}
 
@@ -146,8 +192,7 @@ def _download_window_sync(ticker: str, window_start: date, window_end: date):
         return df
 
     except Exception as exc:
-        logger.warning("yfinance error for %s: %s.", ticker, exc)
-        return None
+        raise PriceFetchError(f"yfinance error for {ticker}: {exc}") from exc
 
 
 def _first_close_after(df, filing_date: date) -> Decimal | None:

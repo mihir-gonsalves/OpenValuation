@@ -37,8 +37,8 @@ Large share counts (~1.5e10) become JS doubles. That is exact below 2^53 and fin
 The backend cold-starts in 30-50s on Render's free tier.
 
 - `shouldRetry` retries server and network failures up to 10 times, with `coldStartDelay` backing off as `3^attempt` capped at 6s, so a query resolves on its own once the backend wakes and the user never retypes. Any `ApiError` with a 4xx status returns `false`, since a bad CIK or an IFRS filer will not become valid on retry. The same predicate gates the "Try again" button.
-- The landing page polls `/health` on a 5s `refetchInterval` with `retry: false` rather than a retry budget, because an interval keeps probing through errors and flips the notice to the ready state on its own after an arbitrarily long wake. The interval turns itself off once data arrives, `staleTime: Infinity` means a warm server is never probed again, and `useServerReady` applies a 600ms grace period so a warm server resolves before the notice could flash.
-- `LoadingState` adds a "server may be waking from idle" line after 6s, so a long wait reads as expected rather than broken.
+- The landing page polls `/api/health` on a 5s `refetchInterval` with `retry: false` rather than a retry budget, because an interval keeps probing through errors and flips the notice to the ready state on its own after an arbitrarily long wake. The interval turns itself off once data arrives, `staleTime: Infinity` means a warm server is never probed again, and `useServerReady` applies a 600ms grace period so a warm server resolves before the notice could flash.
+- `LoadingState` adds a "server may be waking from idle" line after 8s, so a long wait reads as expected rather than broken.
 
 ## 4. Errors are normalized once, in the client
 

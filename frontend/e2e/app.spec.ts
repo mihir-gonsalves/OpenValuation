@@ -87,7 +87,7 @@ const FINANCIALS = {
 }
 
 test('search a company and view its multiples', async ({ page }) => {
-  await page.route('**/health', (route) => route.fulfill({ json: { status: 'ok' } }))
+  await page.route('**/api/health', (route) => route.fulfill({ json: { status: 'ok' } }))
   await page.route('**/api/search', (route) =>
     route.fulfill({ json: SEARCH }),
   )

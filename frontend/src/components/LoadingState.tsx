@@ -9,7 +9,7 @@ export function LoadingState() {
   const [slow, setSlow] = useState(false)
 
   useEffect(() => {
-    const id = setTimeout(() => setSlow(true), 6000)
+    const id = setTimeout(() => setSlow(true), 8000)
     return () => clearTimeout(id)
   }, [])
 

@@ -83,7 +83,7 @@ Two handlers in `main.py` enforce it. The first unwraps any `detail` dict carryi
 
 The taxonomy check is a separate step after the fetch, and it distinguishes an IFRS filer from a filer with no recognized taxonomy at all. Both are 422 and both are dead ends, but naming which one lets the user understand why a real company returned nothing instead of seeing an unexplained empty table.
 
-## 6. `/health` is a contract with the frontend, not just a probe
+## 6. `/api/health` is a contract with the frontend, not just a probe
 
 It returns `status`, `version`, `cache.stats()`, and `company_index_size`. The frontend's landing page polls it to decide whether the backend is cold, so it has to stay cheap and dependency-free: it reads process-local state and makes no outbound call. The cache and index numbers are there because they are the two pieces of state a restart silently resets.
 
