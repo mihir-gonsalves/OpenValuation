@@ -1,7 +1,7 @@
 # PHASE_5_SPEC.md
 
 **Scope:** Deployment  
-**Status:** In Progress  
+**Status:** Complete  
 **Implemented in:** `backend/app/main.py`, `backend/app/services/price.py`, `frontend/src/api/client.ts`, `frontend/vite.config.ts`  
 **Deployed on:** Render (backend) and Vercel (frontend)
 

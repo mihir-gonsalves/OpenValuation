@@ -2,6 +2,7 @@ import { StrictMode } from 'react'
 import { createRoot } from 'react-dom/client'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { BrowserRouter, Route, Routes } from 'react-router-dom'
+import { Analytics } from '@vercel/analytics/react'
 import { TooltipProvider } from '@/components/ui/tooltip'
 import App from './App.tsx'
 import { Learn } from '@/components/Learn'
@@ -25,6 +26,7 @@ createRoot(document.getElementById('root')!).render(
             <Route path="/" element={<App />} />
             <Route path="/learn" element={<Learn />} />
           </Routes>
+          <Analytics />
         </TooltipProvider>
       </BrowserRouter>
     </QueryClientProvider>

@@ -281,13 +281,13 @@ Excel:
 
 ### Phase 5: Deployment
 
-Status: In progress
+Status: Complete
 
 * Deploy backend on Render
 * Deploy frontend on Vercel
+* Add Vercel analytics
 * Configure CORS
 * Set EDGAR headers
-* CI and deployment pipeline
 
 ### Phase 6: QA and Finalization
 
