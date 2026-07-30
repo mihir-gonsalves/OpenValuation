@@ -60,13 +60,12 @@ Division uses the default 28-digit context and results are never rounded. Displa
 
 ## 2. Warning ownership
 
-This phase raises exactly the four codes `PHASE_2_SPEC.md` reserves for it: `ev_debt_missing`, `denominator_near_zero`, `negative_book_value`, `negative_fcf`. Everything else belongs to extraction, including `fallback_eps_basic`, where Phase 3 only flips the label. The engine does not dedup its own output. It relies on the router doing so over the merged union, which is what §1.4 depends on.
+This phase raises exactly the five codes `PHASE_2_SPEC.md` reserves for it: `ev_debt_missing`, `denominator_near_zero`, `negative_book_value`, `negative_fcf`, `input_missing`. Everything else belongs to extraction, including `fallback_tag`, where Phase 3 only flips the P/E label on the basic-EPS path. The engine does not dedup its own output. It relies on the router doing so over the merged union, which is what §1.4 depends on.
 
 ## 3. Known limitations (accepted)
 
-1. **No `missing_da` warning.** Absent D&A makes EV/EBITDA N/A with no structured flag. The divergence from EV/EBIT is the user-visible signal.
-2. **Shares and EPS basis mismatch is unflagged.** Market cap uses point-in-time basic shares while P/E uses weighted-average diluted EPS. Documented and intentional, not something this phase warns about.
-3. **Partial debt tagging is unflagged.** `ev_debt_missing` fires only when all debt and lease tags are absent, so a company that tags some but not all of its debt produces a possibly understated EV with no warning.
+1. **Shares and EPS basis mismatch is unflagged.** Market cap uses point-in-time basic shares while P/E uses weighted-average diluted EPS. Documented and intentional, not something this phase warns about.
+2. **Partial debt tagging is unflagged.** `ev_debt_missing` fires only when all debt and lease tags are absent, so a company that tags some but not all of its debt produces a possibly understated EV with no warning.
 
 ## 4. What the pure-function tests pin
 

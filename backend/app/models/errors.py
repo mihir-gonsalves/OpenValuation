@@ -25,11 +25,13 @@ class WarningCode(str, Enum):
     """Data-quality conditions attached to individual TTM periods."""
 
     # --- Fallback tag fires ---
-    FALLBACK_REVENUE = "fallback_revenue"
-    """Primary revenue tag absent, a fallback tag was used."""
-
-    FALLBACK_EPS_BASIC = "fallback_eps_basic"
-    """Diluted EPS tag absent, basic EPS used. P/E label updated to 'P/E (basic)'."""
+    FALLBACK_TAG = "fallback_tag"
+    """
+    A concept's primary XBRL tag was absent, so a later tag in its chain was used.
+    
+    Raised for every chain except: `DEBT_DEDUPLICATED`, `CASH_FALLBACK_INCLUDES_INVESTMENTS`,
+    and `LEASE_PRE_ASC842`.
+    """
 
     # --- EV construction ---
     EV_DEBT_MISSING = "ev_debt_missing"
@@ -113,6 +115,13 @@ class WarningCode(str, Enum):
     professional databases suppress rather than display it.
     """
 
+    INPUT_MISSING = "input_missing"
+    """
+    A required fundamental input (e.g. Revenue, D&A) was not found in the
+    filing. The affected multiple is N/A. Price-side absences are not
+    flagged with this code - those are covered by PRICE_UNAVAILABLE.
+    """
+
     # --- Price data ---
     PRICE_UNAVAILABLE = "price_unavailable"
     """
@@ -169,8 +178,8 @@ class Warning(BaseModel):
 
     concept: str | None = None
     """
-    Concept name for the aggregatable codes (TTM_ANNUALIZED, AMENDMENT_EXISTS).
-    Consumed by dedup_warnings, not displayed.
+    Concept name for the aggregatable codes (FALLBACK_TAG, AMENDMENT_EXISTS, TTM_ANNUALIZED,
+    INPUT_MISSING). Consumed by dedup_warnings, not displayed.
     """
 
     model_config = {"use_enum_values": True}

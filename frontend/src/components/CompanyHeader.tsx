@@ -5,7 +5,7 @@ import type { CompanyMeta } from '@/api/types'
 
 interface CompanyHeaderProps {
   company: CompanyMeta
-  dataAsOf: string
+  dataAsOf: string | null
 }
 
 export function CompanyHeader({ company, dataAsOf }: CompanyHeaderProps) {

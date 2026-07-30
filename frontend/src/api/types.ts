@@ -12,8 +12,7 @@
 // --- Warning & error codes (mirror app/models/errors.py) ---
 
 export type WarningCode =
-  | 'fallback_revenue'
-  | 'fallback_eps_basic'
+  | 'fallback_tag'
   | 'ev_debt_missing'
   | 'debt_deduplicated'
   | 'cash_fallback_includes_investments'
@@ -27,6 +26,7 @@ export type WarningCode =
   | 'denominator_near_zero'
   | 'negative_book_value'
   | 'negative_fcf'
+  | 'input_missing'
   | 'price_unavailable'
 
 export type ErrorCode =

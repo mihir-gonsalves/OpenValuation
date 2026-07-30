@@ -167,7 +167,7 @@ All periods are displayed in a single table. A "data as of" timestamp indicates 
     - Negative Stockholders' Equity -> P/B is `N/A` with `negative_book_value`
     (a negative P/B is not analytically interpretable the way a negative P/E is)
 
-Warnings such as `ev_debt_missing` or `fallback_eps_basic` are displayed inline per period.
+Warnings such as `fallback_tag` or `ev_debt_missing` are displayed inline per period.
 
 ### 7. Input Audit Panel
 
@@ -442,6 +442,11 @@ All tags are from the `us-gaap` taxonomy. Tags are listed in fallback order. The
 
 **Notes:**
 - Non-USD values are rejected and treated as missing.
+- When a fallback tag fires, the period carries a single `fallback_tag` warning naming every affected concept and the tag used.
+  - The chains whose fallback has a distinct accounting consequence raise their own code instead:
+    - `debt_deduplicated`
+    - `cash_fallback_includes_investments`
+    - `lease_pre_asc842`
 - EBIT is proxied by `OperatingIncomeLoss`. 
   - For most companies these are equivalent, but they can diverge when companies classify items such as equity-method investment income above the operating line. 
   - The UI and audit panel label this value as "Operating Income" to reflect the source accurately.

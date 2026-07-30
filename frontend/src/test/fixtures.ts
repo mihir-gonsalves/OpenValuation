@@ -183,7 +183,7 @@ export const msftFinancials: FinancialsResponse = {
           value: 36.2,
           label: 'P/E (basic)',
           warnings: [
-            { code: 'fallback_eps_basic', message: 'Diluted EPS unavailable, basic EPS used.' },
+            { code: 'fallback_tag', message: 'Primary tag absent, fallback used for EPS (EarningsPerShareBasic).' },
           ],
         },
         pfcf: { value: 38.0, label: 'P/FCF', warnings: [] },
@@ -219,11 +219,14 @@ export const msftFinancials: FinancialsResponse = {
           },
         ],
         warnings: [
-          { code: 'fallback_eps_basic', message: 'Diluted EPS unavailable, basic EPS used.' },
+          { code: 'fallback_tag', message: 'Primary tag absent, fallback used for EPS (EarningsPerShareBasic).' },
         ],
       },
+      // fallback_tag also rides the pe cell above, so the badge filter
+      // hides it here, ttm_annualized is period-level and stays visible.
       warnings: [
-        { code: 'fallback_eps_basic', message: 'Diluted EPS unavailable, basic EPS used.' },
+        { code: 'fallback_tag', message: 'Primary tag absent, fallback used for EPS (EarningsPerShareBasic).' },
+        { code: 'ttm_annualized', message: 'Prior-year data unavailable for Revenue. TTM annualized from current YTD.' },
       ],
     },
   ],

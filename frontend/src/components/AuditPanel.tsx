@@ -5,7 +5,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow, } from '
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { cn } from '@/lib/utils'
-import { formatAuditValue, formatCompactCurrency, NA } from '@/lib/format'
+import { formatAuditValue, formatCompactCurrency, formatUnit, NA } from '@/lib/format'
 import type { EVComponents, TTMPeriod } from '@/api/types'
 
 function EVBreakdown({ ev }: { ev: EVComponents }) {
@@ -90,6 +90,18 @@ export function AuditPanel({ periods }: { periods: TTMPeriod[] }) {
             </TableRow>
           </TableHeader>
           <TableBody>
+            <TableRow className="border-transparent">
+              <TableCell className="p-3.5 font-medium">Price</TableCell>
+              <TableCell className="text-muted-foreground text-xs">
+                yfinance &middot; Adjusted Close on Next Trading Day After Filing
+              </TableCell>
+              <TableCell className="text-muted-foreground text-xs text-right">
+                {formatUnit('USD/shares')}
+              </TableCell>
+              <TableCell className="p-3.5 tnum font-medium text-right">
+                {formatAuditValue(period.price, 'USD/shares')}
+              </TableCell>
+            </TableRow>
             {period.extracted.audit.map((entry) => (
               <TableRow key={entry.concept} className="border-transparent">
                 <TableCell className="p-3.5 font-medium">
@@ -105,7 +117,7 @@ export function AuditPanel({ periods }: { periods: TTMPeriod[] }) {
                   {entry.entity_context ?? NA }
                 </TableCell> */}
                 <TableCell className="text-muted-foreground text-xs text-right">
-                  {entry.unit ?? NA }
+                  {formatUnit(entry.unit)}
                 </TableCell>
                 <TableCell className={cn("p-3.5 tnum font-medium text-right", entry.value !== null && entry.value < 0 && 'text-destructive')}>
                   {formatAuditValue(entry.value, entry.unit)}

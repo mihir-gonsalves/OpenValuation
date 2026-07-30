@@ -34,6 +34,21 @@ def _or_zero(x: Decimal | None) -> Decimal:
     return x if x is not None else _ZERO
 
 
+def _missing_inputs(*named: tuple[str, Decimal | None]) -> list[Warning]:
+    """
+    One input_missing warning per absent fundamental, by display name.
+    """
+    return [
+        warn(
+            WarningCode.INPUT_MISSING,
+            f"{name} is unavailable for this period.",
+            concept=name,
+        )
+        for name, value in named
+        if value is None
+    ]
+
+
 def _safe_divide(
     numerator: Decimal | None,
     denominator: Decimal | None,
@@ -42,13 +57,22 @@ def _safe_divide(
     """
     Divide with the two guards every multiple shares.
 
-    A missing operand returns (None, []) with no warning, since the cause was
-    already surfaced upstream and re-flagging it here would only duplicate
-    noise. A near-zero denominator returns None with denominator_near_zero.
+    A missing denominator (a fundamental) returns None with input_missing,
+    since extraction raises nothing for an unmatched tag chain. 
+    
+    A missing numerator (price, market cap, or EV) stays silent - it has
+    already been surfaced upstream by price_unavailable. 
+    
+    (Residual edge: shares outstanding missing while price is present is
+    silent: rare, accepted.)
+    
+    A near-zero denominator returns None with denominator_near_zero.
 
     Callers with extra rules apply them before delegating here.
     """
-    if numerator is None or denominator is None:
+    if denominator is None:
+        return None, _missing_inputs((denom_name, None))
+    if numerator is None:
         return None, []
     if abs(denominator) < DENOMINATOR_NEAR_ZERO_THRESHOLD:
         return None, [warn(
@@ -190,12 +214,13 @@ def compute_ev_ebitda(
     """
     EV/EBITDA = EV / (Operating Income + D&A).
 
-    Both operands are required. Absent D&A makes this N/A rather than a silent
-    proxy for EV/EBIT, and there is no warning code for it. Negative EBITDA
+    Both operands are required. Absent D&A makes this N/A with input_missing
+    rather than allow EV/EBIDTA to act as a proxy for EV/EBIT. Negative EBITDA
     gives a valid negative multiple.
     """
-    if operating_income is None or da is None:
-        return None, []
+    missing = _missing_inputs(("Operating Income", operating_income), ("D&A", da))
+    if missing:
+        return None, missing
     return _safe_divide(ev, operating_income + da, "EBITDA")
 
 
@@ -239,8 +264,11 @@ def compute_pfcf(
     near-zero guard, since the more specific condition wins. CapEx arrives as a
     non-negative outflow.
     """
-    if market_cap is None or operating_cash_flow is None or capex is None:
+    if market_cap is None:
         return None, []
+    missing = _missing_inputs(("Operating Cash Flow", operating_cash_flow), ("CapEx", capex))
+    if missing:
+        return None, missing
     fcf = operating_cash_flow - capex
     if fcf < _ZERO:
         return None, [warn(
@@ -268,10 +296,12 @@ def compute_pb(
     P/B = Market Cap / Stockholders' Equity.
 
     Negative equity is N/A with negative_book_value, unlike a negative P/E which
-    is interpretable. Checked before the near-zero guard, per DESIGN.md.
+    is interpretable. Checked before the near-zero guard.
     """
-    if market_cap is None or stockholders_equity is None:
+    if market_cap is None:
         return None, []
+    if stockholders_equity is None:
+        return None, _missing_inputs(("Stockholders' Equity", None))
     if stockholders_equity < _ZERO:
         return None, [warn(
             WarningCode.NEGATIVE_BOOK_VALUE,

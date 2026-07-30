@@ -70,7 +70,7 @@ class TestPE:
         value, label, warnings = compute_pe(D("100"), D("5"), eps_is_basic=True)
         assert value == D("20")
         assert label == "P/E (basic)"
-        # The fallback_eps_basic warning is owned by Phase 2, not re-emitted here.
+        # The fallback_tag warning is owned by Phase 2, not re-emitted here.
         assert warnings == []
 
     def test_missing_price_is_na_without_warning(self):
@@ -78,10 +78,11 @@ class TestPE:
         assert value is None
         assert warnings == []
 
-    def test_missing_eps_is_na_without_warning(self):
+    def test_missing_eps_is_na_with_input_missing(self):
         value, _, warnings = compute_pe(D("100"), None)
         assert value is None
-        assert warnings == []
+        assert _codes(warnings) == [WarningCode.INPUT_MISSING]
+        assert warnings[0].concept == "EPS"
 
     def test_near_zero_eps_is_na_with_warning(self):
         value, _, warnings = compute_pe(D("100"), D("0.009"))
@@ -107,15 +108,23 @@ class TestEVEBITDA:
         assert warnings == []
 
     def test_missing_da_is_na_no_proxy_for_ev_ebit(self):
-        # D&A absent -> N/A, never a silent fallback to EV/EBIT.
+        # D&A absent -> N/A with input_missing, never a silent fallback to EV/EBIT.
         value, warnings = compute_ev_ebitda(D("1000"), D("80"), None)
         assert value is None
-        assert warnings == []
+        assert _codes(warnings) == [WarningCode.INPUT_MISSING]
+        assert warnings[0].concept == "D&A"
 
     def test_missing_operating_income_is_na(self):
         value, warnings = compute_ev_ebitda(D("1000"), None, D("20"))
         assert value is None
-        assert warnings == []
+        assert _codes(warnings) == [WarningCode.INPUT_MISSING]
+        assert warnings[0].concept == "Operating Income"
+
+    def test_missing_both_ebitda_inputs_warns_for_each(self):
+        value, warnings = compute_ev_ebitda(D("1000"), None, None)
+        assert value is None
+        assert _codes(warnings) == [WarningCode.INPUT_MISSING, WarningCode.INPUT_MISSING]
+        assert [w.concept for w in warnings] == ["Operating Income", "D&A"]
 
     def test_negative_ebitda_yields_negative_multiple(self):
         value, warnings = compute_ev_ebitda(D("1000"), D("-150"), D("50"))
@@ -155,9 +164,15 @@ class TestPlainDivisionMultiples:
     def test_ev_revenue_basic(self):
         assert compute_ev_revenue(D("5000"), D("1000")) == (D("5"), [])
 
-    def test_ev_revenue_missing(self):
+    def test_ev_revenue_missing_ev_is_silent(self):
+        # Missing EV is price-side, already explained by price_unavailable.
         assert compute_ev_revenue(None, D("1000")) == (None, [])
-        assert compute_ev_revenue(D("5000"), None) == (None, [])
+
+    def test_ev_revenue_missing_revenue_warns(self):
+        value, warnings = compute_ev_revenue(D("5000"), None)
+        assert value is None
+        assert _codes(warnings) == [WarningCode.INPUT_MISSING]
+        assert warnings[0].concept == "Revenue"
 
     def test_ps_basic(self):
         assert compute_ps(D("8000"), D("1000")) == (D("8"), [])
@@ -194,9 +209,15 @@ class TestPB:
         assert value is None
         assert _codes(warnings) == [WarningCode.DENOMINATOR_NEAR_ZERO]
 
-    def test_missing_inputs(self):
+    def test_missing_market_cap_is_silent(self):
+        # Price-side absence is already explained by price_unavailable.
         assert compute_pb(None, D("1000")) == (None, [])
-        assert compute_pb(D("9000"), None) == (None, [])
+
+    def test_missing_equity_warns(self):
+        value, warnings = compute_pb(D("9000"), None)
+        assert value is None
+        assert _codes(warnings) == [WarningCode.INPUT_MISSING]
+        assert warnings[0].concept == "Stockholders' Equity"
 
 
 # ===========================================================================
@@ -225,11 +246,21 @@ class TestPFCF:
         assert value is None
         assert _codes(warnings) == [WarningCode.DENOMINATOR_NEAR_ZERO]
 
-    def test_missing_capex_is_na(self):
-        assert compute_pfcf(D("10000"), D("1200"), None) == (None, [])
+    def test_missing_capex_warns(self):
+        value, warnings = compute_pfcf(D("10000"), D("1200"), None)
+        assert value is None
+        assert _codes(warnings) == [WarningCode.INPUT_MISSING]
+        assert warnings[0].concept == "CapEx"
 
-    def test_missing_ocf_is_na(self):
-        assert compute_pfcf(D("10000"), None, D("200")) == (None, [])
+    def test_missing_ocf_warns(self):
+        value, warnings = compute_pfcf(D("10000"), None, D("200"))
+        assert value is None
+        assert _codes(warnings) == [WarningCode.INPUT_MISSING]
+        assert warnings[0].concept == "Operating Cash Flow"
+
+    def test_missing_market_cap_is_silent(self):
+        # Price-side absence is already explained by price_unavailable.
+        assert compute_pfcf(None, D("1200"), D("200")) == (None, [])
 
 
 # ===========================================================================

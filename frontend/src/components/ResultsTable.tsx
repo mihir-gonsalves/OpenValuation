@@ -70,7 +70,12 @@ function MultipleCell({ mv }: { mv: MultipleValue }) {
 }
 
 function PeriodWarnings({ period }: { period: TTMPeriod }) {
-  const warnings = dedupeWarnings(period.warnings)
+  // Codes already surfaced on a cell tooltip are omitted here so each
+  // warning appears in exactly one place (the Excel export keeps the union).
+  const cellCodes = new Set(
+    MULTIPLE_KEYS.flatMap((k) => period.multiples[k].warnings.map((w) => w.code)),
+  )
+  const warnings = dedupeWarnings(period.warnings).filter((w) => !cellCodes.has(w.code))
   if (warnings.length === 0) return null
   return (
     <WarningTooltip

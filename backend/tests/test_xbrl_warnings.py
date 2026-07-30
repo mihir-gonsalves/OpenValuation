@@ -5,7 +5,7 @@ Tests for app/services/xbrl_warnings.py.
 Coverage
 --------
 TestDedupWarningsHelper         dedup_warnings - basic properties
-TestDedupWarningsAggregation    AMENDMENT_EXISTS aggregation # aggregation regression guard
+TestDedupWarningsAggregation    AMENDMENT_EXISTS and FALLBACK_TAG aggregation # aggregation regression guard
 TestMakeFlowWarnings            _make_flow_warnings in isolation
 test_no_orphan_warning_codes    every WarningCode is raised or documented # orphan-code guard
 """
@@ -19,7 +19,7 @@ from decimal import Decimal
 import pytest
 
 from app.models.errors import Warning, WarningCode, warn
-from app.services.xbrl_warnings import dedup_warnings, _make_flow_warnings
+from app.services.xbrl_warnings import dedup_warnings, make_fallback_warning, _make_flow_warnings
 
 
 # ===========================================================================
@@ -99,6 +99,21 @@ class TestDedupWarningsAggregation:
         assert "CommonStockSharesOutstanding" in msg
         assert "LongTermDebt" in msg
 
+    def test_fallback_tag_aggregates_two_concepts(self):
+        """A period with two fallbacks (e.g. NVDA's revenue and CapEx) must name both.
+
+        Regression guard: before FALLBACK_TAG, per-concept codes meant only the
+        first fallback ever reached the period header.
+        """
+        result = dedup_warnings([
+            make_fallback_warning("Revenue", "Revenues"),
+            make_fallback_warning("CapEx", "PaymentsToAcquireProductiveAssets"),
+        ])
+        assert len(result) == 1
+        msg = result[0].message
+        assert "Revenue" in msg
+        assert "CapEx" in msg
+
     def test_amendment_exists_dedupes_repeated_tag(self):
         """Same tag named twice - should appear exactly once in the merged message."""
         result = dedup_warnings([
@@ -107,6 +122,16 @@ class TestDedupWarningsAggregation:
         ])
         assert len(result) == 1
         assert result[0].message.count("LongTermDebt") == 1
+
+    def test_input_missing_aggregates_two_concepts(self):
+        """INPUT_MISSING warnings from different multiples merge into one line."""
+        result = dedup_warnings([
+            warn(WarningCode.INPUT_MISSING, "...", concept="D&A"),
+            warn(WarningCode.INPUT_MISSING, "...", concept="CapEx"),
+        ])
+        assert len(result) == 1
+        assert "D&A" in result[0].message
+        assert "CapEx" in result[0].message
 
     def test_ttm_annualized_aggregates_three_concepts(self):
         """TTM_ANNUALIZED aggregation uses concept field, not message format."""
@@ -260,6 +285,7 @@ def test_no_orphan_warning_codes():
         "denominator_near_zero",  # raised in Phase 3 (multiples.py)
         "negative_book_value",    # raised in Phase 3 (multiples.py)
         "negative_fcf",           # raised in Phase 3 (multiples.py)
+        "input_missing",          # raised in multiples.py
         "period_mismatch",        # deprecated by anchor model (see errors.py docstring)
     }
 

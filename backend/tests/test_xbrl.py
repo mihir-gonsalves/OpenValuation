@@ -276,6 +276,19 @@ class TestCapexExtraction:
         res = _extract_capex(_gaap(cart), date(2025, 12, 31), date(2025, 1, 1))
         assert res.value == Decimal("61000000")
 
+    def test_fallback_tag_warning_on_capex(self):
+        gaap = {
+            "PaymentsToAcquireProductiveAssets": {
+                "units": {"USD": [
+                    {"start": "2024-01-01", "end": "2024-12-31", "val": 50_000, "form": "10-K"}
+                ]}
+            }
+        }
+        res = _extract_capex(gaap, date(2024, 12, 31), date(2024, 1, 1))
+        assert res.value == Decimal("50000")
+        assert res.is_fallback
+        assert any(w.code == "fallback_tag" for w in res.warnings)
+
 
 class TestEpsExtraction:
 
@@ -306,7 +319,7 @@ class TestEpsExtraction:
         res = _extract_eps(gaap, date(2024, 12, 31), date(2024, 1, 1))
         assert res.value == Decimal("2.5")
         assert res.is_fallback
-        assert any(w.code == "fallback_eps_basic" for w in res.warnings)
+        assert any(w.code == "fallback_tag" for w in res.warnings)
 
     def test_eps_missing_returns_none(self):
         assert _extract_eps({}, date(2024, 12, 31), date(2024, 1, 1)).value is None
@@ -418,12 +431,12 @@ class TestRevenueExtraction:
         assert res.value == Decimal("4386722000")
         assert not any(w.code == "ttm_annualized" for w in res.warnings)  # full bridge, no annualization
 
-    def test_fallback_revenue_warning(self):
+    def test_fallback_tag_warning_on_revenue(self):
         from app.services.xbrl import _extract_revenue
         gaap = {"Revenues": {"units": {"USD": [{"start": "2024-01-01", "end": "2024-12-31", "val": 999_000, "form": "10-K"}]}}}
         res = _extract_revenue(gaap, date(2024, 12, 31), date(2024, 1, 1))
         assert res.value == Decimal("999000")
-        assert any(w.code == "fallback_revenue" for w in res.warnings)
+        assert any(w.code == "fallback_tag" for w in res.warnings)
 
 
 class TestOCFExtraction:
@@ -777,7 +790,7 @@ class TestAmbiguousFactWarningAtPeriodLevel:
         p = periods[0]
         assert p.revenue == Decimal("3000000")
         assert not any(w.code == "ambiguous_fact" for w in p.warnings)
-        assert any(w.code == "fallback_revenue" for w in p.warnings)
+        assert any(w.code == "fallback_tag" for w in p.warnings)
 
 
 class TestAmendmentExistsWarning:

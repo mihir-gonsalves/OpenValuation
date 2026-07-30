@@ -276,8 +276,7 @@ REVENUE_TAGS = [
 ]
 ```
 
-When a fallback fires, the `warnings` array includes a structured note (e.g., `{ code: "fallback_revenue", message: "Primary tag absent, using Revenues" }`).  
-The Input Audit Panel shows which tag was used.
+When a fallback fires, the `warnings` array includes a structured note (e.g., `{ code: "fallback_tag", message: "Primary tag absent, fallback used for Revenue." }`). One `fallback_tag` warning per period names every concept that fell back, the Input Audit Panel shows which tag was used.
 
 If no tag matches at all: value returns as `None`, UI displays `N/A`.
 
@@ -388,7 +387,7 @@ All multiples are computed from reported GAAP figures. No non-GAAP adjustments.
 - **Negative book value:** if `StockholdersEquity < 0`, P/B returns `N/A` with a `negative_book_value` warning. The ratio is not analytically interpretable when equity is negative, which is a distinct condition from a near-zero denominator and must be checked explicitly before the near-zero guard runs.
 - **Negative FCF:** if `OperatingCashFlow − CapEx < 0`, P/FCF returns `N/A` with a `negative_fcf` warning. Negative FCF is ambiguous and not reported by professional databases as a negative multiple. Like negative book value, it is a distinct condition checked before the near-zero guard, and it fires on present data so it carries a warning.
 - **Near-zero denominators:** if `abs(denominator) < 0.01`, return `N/A` with `denominator_near_zero`. This avoids unstable or non-meaningful multiples from numerically insignificant denominators.
-- **P/E fallback:** if diluted EPS is absent, falls back to basic EPS, labeled "P/E (basic)" with `fallback_eps_basic` warning.
+- **P/E fallback:** if diluted EPS is absent, falls back to basic EPS, labeled "P/E (basic)" and named in the period's `fallback_tag` warning.
 - **CapEx Tag Selection:**
 Only cash-based CapEx tags are used. Obligation-based tags (e.g., `CapitalExpendituresIncurringObligation`) are excluded because they do not reflect cash outflows and would distort free cash flow.
 - **CapEx sign normalization:** CapEx is sometimes reported as a negative cash outflow. The tool takes the absolute value if necessary and sets `capex_sign_normalized`.

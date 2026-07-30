@@ -159,9 +159,9 @@ class TestTgtRevenue:
         assert res.value == Decimal("105242000000")
         assert not any(w.code == "ttm_annualized" for w in res.warnings)  # full bridge, no annualization
 
-    def test_no_fallback_revenue_warning_on_primary_tag(self, tgt):
+    def test_no_fallback_tag_warning_on_primary_tag(self, tgt):
         res = _extract_revenue(_gaap(tgt), date(2026, 1, 31), date(2025, 2, 2))
-        assert not any(w.code == "fallback_revenue" for w in res.warnings)
+        assert not any(w.code == "fallback_tag" for w in res.warnings)
 
 
 class TestTgtDebt:

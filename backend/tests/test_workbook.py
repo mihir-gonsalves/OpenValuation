@@ -51,7 +51,7 @@ def _period(period_end: date, **overrides) -> TTMPeriod:
     return TTMPeriod(
         period_end=period_end, filing_date=ef.filing_date, price=ef.price,
         multiples=ms, ev_components=ev, extracted=ef,
-        warnings=[Warning(code=WarningCode.FALLBACK_EPS_BASIC, message="Basic EPS used.")],
+        warnings=[Warning(code=WarningCode.FALLBACK_TAG, message="Basic EPS used.")],
     )
 
 

@@ -17,13 +17,30 @@ from app.models.errors import Warning, WarningCode, warn
 # changes cannot break it.
 
 _AGGREGATABLE_TEMPLATES: dict[str, str] = {
-    WarningCode.TTM_ANNUALIZED.value: (
-        "Prior-year data unavailable for {names}. TTM annualized from current YTD."
+    WarningCode.FALLBACK_TAG.value: (
+        "Primary tag absent, fallback used for {names}."
     ),
     WarningCode.AMENDMENT_EXISTS.value: (
         "Amendment filing used for {names}."
     ),
+    WarningCode.TTM_ANNUALIZED.value: (
+        "Prior-year data unavailable for {names}. TTM annualized from current YTD."
+    ),
+    WarningCode.INPUT_MISSING.value: (
+        "Data unavailable for {names}. Affected multiples are N/A."
+    ),
 }
+
+
+def make_fallback_warning(concept_name: str, tag: str) -> Warning:
+    """
+    The FALLBACK_TAG warning for a concept whose primary tag was absent.
+    """
+    return warn(
+        WarningCode.FALLBACK_TAG,
+        f"Primary tag absent for {concept_name}.",
+        concept=concept_name,
+    )
 
 
 def _make_flow_warnings(

@@ -23,9 +23,21 @@ describe('ResultsTable', () => {
     expect(screen.getAllByText('—').length).toBeGreaterThan(0)
   })
 
-  it('surfaces a per-period notes badge when the period has warnings', () => {
+  it('surfaces a per-period notes badge excluding warnings already shown on a cell', () => {
+    // MSFT's period has fallback_tag (also on the pe cell -> filtered
+    // from the badge) and ttm_annualized (period-level -> counted).
     renderWithProviders(<ResultsTable periods={msftFinancials.periods} />)
     expect(screen.getByText(/1 note/)).toBeInTheDocument()
+  })
+
+  it('renders no badge when all period warnings are duplicated on cells', () => {
+    const period = msftFinancials.periods[0]
+    const cellOnly = {
+      ...period,
+      warnings: period.multiples.pe.warnings,
+    }
+    renderWithProviders(<ResultsTable periods={[cellOnly]} />)
+    expect(screen.queryByText(/note/)).not.toBeInTheDocument()
   })
 
   it('shows an empty message when there are no periods', () => {

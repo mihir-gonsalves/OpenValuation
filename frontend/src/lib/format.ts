@@ -79,6 +79,12 @@ export function formatAuditValue(value: number | null | undefined, unit: string 
   return formatNumber(value, 2)
 }
 
+/** Display form of an XBRL unit: EDGAR's 'USD/shares' reads better as 'USD/share'. */
+export function formatUnit(unit: string | null): string {
+  if (!unit) return NA
+  return unit === 'USD/shares' ? 'USD/share' : unit
+}
+
 function parseISO(iso: string | null | undefined): Date | null {
   if (!iso) return null
   const d = new Date(iso)

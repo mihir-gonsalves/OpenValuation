@@ -75,7 +75,8 @@ export default function App() {
         {isError && <ErrorMessage error={error} onRetry={() => refetch()} />}
         {data && (
           <>
-            <CompanyHeader company={data.company} dataAsOf={data.data_as_of} />
+            {/* Pass cached_at timestamp as dataAsOf (see PHASE_4_SPEC.md §5)*/}
+            <CompanyHeader company={data.company} dataAsOf={data.cached_at} />
             <ResultsTable periods={data.periods} />
             <AuditPanel key={data.company.cik_10} periods={data.periods} />
           </>

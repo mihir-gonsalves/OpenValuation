@@ -68,7 +68,7 @@ Conflicting non-amendment values drop the value and record the key as ambiguous.
 
 ### 2.7 EPS keeps a stable audit concept name
 
-The audit entry is always `concept="EPS"`, never `"EPS (Diluted)"`. The tag used is in `xbrl_tag`, and `is_fallback` plus `fallback_eps_basic` disambiguate the basic path. Labeling the row "EPS (Diluted)" when basic fired would be an outright false statement in the audit panel. A neutral label cannot lie.
+The audit entry is always `concept="EPS"`, never `"EPS (Diluted)"`. The tag used is in `xbrl_tag`, and `is_fallback` plus `fallback_tag` disambiguate the basic path. Labeling the row "EPS (Diluted)" when basic fired would be an outright false statement in the audit panel. A neutral label cannot lie.
 
 ### 2.8 GAAP shares match by date, DEI shares match by accession
 
@@ -89,9 +89,9 @@ GAAP `CommonStockSharesOutstanding` is an instant whose `end` is the true period
 
 Codes are defined in `app/models/errors.py`.
 
-**Raised by Phase 2 extraction:** `ttm_annualized`, `fallback_revenue`, `fallback_eps_basic`, `debt_deduplicated`, `cash_fallback_includes_investments`, `capex_sign_normalized`, `lease_pre_asc842`, `finance_lease_missing_capital_intensive`, `price_unavailable`, `amendment_exists`, and `ambiguous_fact`. 
+**Raised by Phase 2 extraction:** `ttm_annualized`, `fallback_tag`, `debt_deduplicated`, `cash_fallback_includes_investments`, `capex_sign_normalized`, `lease_pre_asc842`, `finance_lease_missing_capital_intensive`, `price_unavailable`, `amendment_exists`, and `ambiguous_fact`. 
 
-**Defined but reserved for Phase 3** (multiples engine): `ev_debt_missing`, `denominator_near_zero`, `negative_book_value`, `negative_fcf`. 
+**Defined but reserved for Phase 3** (multiples engine): `ev_debt_missing`, `denominator_near_zero`, `negative_book_value`, `negative_fcf`, `input_missing`. 
 
 **Defined but never raised** (see §2.4): `period_mismatch`.
 
@@ -149,6 +149,6 @@ Ordering is most-recent-first, `filing_date` is populated, `price` follows the m
 
 ### 5.3 Paths with no real-data fixture
 
-`fallback_revenue`, `capex_sign_normalized`, pre-ASC 842 capital-lease tags, and `PreferredStock` are covered synthetically only. All four are short, unconditional, and structurally identical to paths already proven by fixtures. **Do not source additional fixtures for these.** The rate-limit exposure buys near-zero incremental confidence.
+`fallback_tag`, `capex_sign_normalized`, pre-ASC 842 capital-lease tags, and `PreferredStock` are covered synthetically only. All four are short, unconditional, and structurally identical to paths already proven by fixtures. **Do not source additional fixtures for these.** The rate-limit exposure buys near-zero incremental confidence.
 
 What the fixtures do pin: every monetary `ExtractedFinancials` field, five fiscal-year-end patterns, all three debt-resolution paths, all four cash-resolution paths, and the bridge at Q1, Q2, Q3, and FY against the oracles above.

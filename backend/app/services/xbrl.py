@@ -48,7 +48,7 @@ from app.services.xbrl_maps import (
     _FlowCache, _FlowEntry, _InstantCache, _InstantEntry, _MAX_ANNUAL_DAYS,
     _ambiguous_near, _build_flow_map, _build_instant_map, _get_instant_result, _get_ttm_value,
 )
-from app.services.xbrl_warnings import dedup_warnings, _make_flow_warnings
+from app.services.xbrl_warnings import dedup_warnings, make_fallback_warning, _make_flow_warnings
 
 logger = logging.getLogger(__name__)
 
@@ -64,7 +64,8 @@ sub-quarterly stub data while still capturing Q1 YTD facts (≈ 85 days).
 # Tag chains: concept -> ordered fallback chain
 # ---------------------------------------------------------------------------
 # Resolvers walk each list in order and take the first tag that yields a value.
-# The first tag is primary, and any later tag firing is a fallback that triggers that concept's FALLBACK_* warning.
+# The first tag is primary, and any later tag firing is a fallback that triggers
+# FALLBACK_TAG - except for long_term_debt, cash, and both finance_lease chains.
 
 # Flow concepts (have both start and end dates). Unit: USD.
 _FLOW_CHAINS: dict[str, list[str]] = {
@@ -419,6 +420,7 @@ def _resolve_flow(
     *,
     unit: str = "USD",
     concept_name: str = "(unknown)",
+    warn_on_fallback: bool = True,
     flow_cache: _FlowCache | None = None,
 ) -> _ConceptResult:
     """
@@ -440,19 +442,22 @@ def _resolve_flow(
         )
 
         if ttm_value is not None:
+            result_warnings = _make_flow_warnings(
+                tag=tag,
+                fiscal_year_start=fiscal_year_start,
+                period_end=period_end,
+                amendment_keys=entry.amendment_keys,
+                was_annualized=was_annualized,
+                concept_name=concept_name,
+            )
+            if chain_index > 0 and warn_on_fallback:
+                result_warnings.append(make_fallback_warning(concept_name, tag))
             return _ConceptResult(
                 value=ttm_value,
                 unit=unit,
                 tag_used=tag,
                 is_fallback=(chain_index > 0),
-                warnings=_make_flow_warnings(
-                    tag=tag,
-                    fiscal_year_start=fiscal_year_start,
-                    period_end=period_end,
-                    amendment_keys=entry.amendment_keys,
-                    was_annualized=was_annualized,
-                    concept_name=concept_name,
-                ),
+                warnings=result_warnings,
             )
 
         # No value. Record any ambiguity but keep walking, since a fallback tag may still produce a clean one.
@@ -476,10 +481,14 @@ def _resolve_instant(
     period_end: date,
     *,
     unit: str = "USD",
+    concept_name: str = "(unknown)",
+    warn_on_fallback: bool = True,
     instant_cache: _InstantCache | None = None,
 ) -> _ConceptResult:
     """
     Balance-sheet counterpart to `_resolve_flow`, using the point-in-time lookup and its +/-7 day tolerance.
+
+    Raises FALLBACK_TAG on the same terms as `_resolve_flow`.
     """
     pending_ambiguous: Warning | None = None
 
@@ -498,6 +507,8 @@ def _resolve_instant(
                     f"Amendment filing used for '{tag}', period: {matched_date}.",
                     concept=tag,
                 ))
+            if chain_index > 0 and warn_on_fallback:
+                result_warnings.append(make_fallback_warning(concept_name, tag))
             return _ConceptResult(value=value, unit=unit, tag_used=tag, is_fallback=(chain_index > 0), warnings=result_warnings)
 
         # No value. Check the whole tolerance window for ambiguity, so a fact
@@ -529,9 +540,9 @@ def _extract_revenue(
     flow_cache: _FlowCache | None = None,
 ) -> _ConceptResult:
     """
-    Resolve revenue, attach FALLBACK_REVENUE when a non-primary tag fires.
+    Resolve revenue. The resolver raises FALLBACK_TAG when a non-primary tag fires.
     """
-    result = _resolve_flow(
+    return _resolve_flow(
         gaap,
         _FLOW_CHAINS["revenue"],
         period_end,
@@ -539,12 +550,6 @@ def _extract_revenue(
         concept_name="Revenue",
         flow_cache=flow_cache,
     )
-    if result.is_fallback and result.value is not None:
-        result.warnings.append(warn(
-            WarningCode.FALLBACK_REVENUE,
-            f"Primary revenue tag absent, using fallback tag '{result.tag_used}'.",
-        ))
-    return result
 
 
 def _extract_eps(
@@ -555,14 +560,14 @@ def _extract_eps(
     flow_cache: _FlowCache | None = None,
 ) -> _ConceptResult:
     """
-    Try diluted EPS first, then basic, attaching FALLBACK_EPS_BASIC on the
-    basic path.
+    Try diluted EPS first, then basic. The resolver's FALLBACK_TAG covers
+    the basic path chain fallback.
 
     The caller records this under the stable concept name "EPS", so
     `is_fallback` and the warning are what disambiguate which tag fired. The
     'P/E (basic)' label is multiples.py's job, read off `AuditEntry`.
     """
-    result = _resolve_flow(
+    return _resolve_flow(
         gaap,
         list(_EPS_TAGS),
         period_end,
@@ -571,12 +576,6 @@ def _extract_eps(
         concept_name="EPS",
         flow_cache=flow_cache,
     )
-    if result.is_fallback and result.value is not None:
-        result.warnings.append(warn(
-            WarningCode.FALLBACK_EPS_BASIC,
-            "Diluted EPS unavailable, using basic EPS. P/E labeled 'P/E (basic)'.",
-        ))
-    return result
 
 
 def _extract_capex(
@@ -614,11 +613,16 @@ def _extract_cash(
 ) -> _ConceptResult:
     """
     Extract cash, warn when the fallback tag (which includes short-term investments) fires.
+
+    CASH_FALLBACK_INCLUDES_INVESTMENTS says everything FALLBACK_TAG would and
+    names the consequence, so the generic code is suppressed with warn_on_fallback=False.
     """
     result = _resolve_instant(
         gaap,
         _INSTANT_CHAINS["cash"],
         period_end,
+        concept_name="Cash",
+        warn_on_fallback=False,
         instant_cache=instant_cache,
     )
     if result.is_fallback and result.value is not None:
@@ -639,6 +643,9 @@ def _extract_finance_lease(
     """
     Extract a finance lease liability, warning when the pre-ASC 842 fallback
     fires, since that accounting differs from post-adoption finance leases.
+
+    LEASE_PRE_ASC842 supersedes the generic FALLBACK_TAG here, so the resolver
+    is told not to raise it.
     """
     chain_key = "finance_lease_current" if current else "finance_lease_noncurrent"
     fallback_tag = (_CAPITAL_LEASE_CURRENT_TAG if current else _CAPITAL_LEASE_NONCURRENT_TAG)
@@ -647,6 +654,8 @@ def _extract_finance_lease(
         gaap,
         _INSTANT_CHAINS[chain_key],
         period_end,
+        concept_name="Finance Lease (Current)" if current else "Finance Lease (Non-Current)",
+        warn_on_fallback=False,
         instant_cache=instant_cache,
     )
     if result.is_fallback and result.value is not None:
@@ -670,11 +679,16 @@ def _extract_debt(
     A True flag means the `LongTermDebt` total fired instead of the noncurrent
     tag. Since that total already includes the current portion, the caller has
     to zero out current_portion_lt_debt to avoid double-counting.
+
+    That is the only fallback in this chain and DEBT_DEDUPLICATED already
+    reports it, so the resolver's generic FALLBACK_TAG is suppressed.
     """
     result = _resolve_instant(
-        gaap, 
+        gaap,
         _INSTANT_CHAINS["long_term_debt"],
         period_end,
+        concept_name="Long-Term Debt",
+        warn_on_fallback=False,
         instant_cache=instant_cache
     )
     # None when both tags failed, which correctly reads as False.
@@ -835,6 +849,7 @@ def _extract_for_anchor(
         gaap,
         _INSTANT_CHAINS["short_term_borrowings"],
         period_end,
+        concept_name="Short-Term Borrowings",
         instant_cache=instant_cache,
     )
     warnings.extend(short_term_borrowings_result.warnings)

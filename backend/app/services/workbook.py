@@ -300,7 +300,7 @@ def _build_period_sheet(ws: Worksheet, period: TTMPeriod) -> dict[str, str]:
             fb = ws.cell(row=r, column=3, value="fallback" if is_fallback else "")
             if is_fallback:
                 fb.font = _FALLBACK_FONT
-            ws.cell(row=r, column=4, value=unit or "-")
+            ws.cell(row=r, column=4, value=("USD/share" if unit == "USD/shares" else unit) or "-")
 
             raw = getattr(ef, attr)
             if raw is not None and attr not in {"price", "eps_diluted"}:
