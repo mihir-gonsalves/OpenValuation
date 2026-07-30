@@ -3,7 +3,7 @@
 OpenValuation's FastAPI application entry point.
 
 Owns the lifespan (shared EDGAR client, company index), CORS, the structured
-error handlers, the three /api routers, and /health.
+error handlers, the three /api routers, and /api/health.
 """
 
 from __future__ import annotations
@@ -165,7 +165,7 @@ app.include_router(export.router, prefix="/api", tags=["Export"])
 # ---------------------------------------------------------------------------
 
 
-@app.get("/health", tags=["Meta"], summary="Health and cache status.")
+@app.get("/api/health", tags=["Meta"], summary="Health and cache status.")
 async def health() -> dict:
     """
     API status and cache statistics. Also the frontend's cold-start probe.

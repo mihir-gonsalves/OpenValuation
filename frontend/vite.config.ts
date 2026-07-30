@@ -22,13 +22,6 @@ export default defineConfig({
         target: 'http://localhost:8000',
         changeOrigin: true,
       },
-      // The health probe hits /health (not under /api), so it must be proxied
-      // too - otherwise the dev server serves index.html, the JSON parse fails,
-      // and the cold-start notice stays stuck on forever.
-      '/health': {
-        target: 'http://localhost:8000',
-        changeOrigin: true,
-      },
     },
   },
   test: {

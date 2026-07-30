@@ -7,7 +7,7 @@ Coverage:
   - Cache hit: EDGAR is NOT called again; same response structure.
   - Warning merge contract: extraction warnings + multiples warnings both appear.
   - NotImplementedError in compute_all: periods returned with empty multiples, no 500.
-  - GET /health: shape (status, cache, company_index_size).
+  - GET /api/health: shape (status, cache, company_index_size).
   - POST /api/search: returns results list.
   - edgar._check_taxonomy: ifrs_filer -> 422.
 """
@@ -195,12 +195,12 @@ def test_not_implemented_multiples_returns_empty_multiples_not_500(client):
 
 
 # ---------------------------------------------------------------------------
-# GET /health shape
+# GET /api/health shape
 # ---------------------------------------------------------------------------
 
 
 def test_health_shape(client):
-    resp = client.get("/health")
+    resp = client.get("/api/health")
     assert resp.status_code == 200
     body = resp.json()
     assert body["status"] == "ok"

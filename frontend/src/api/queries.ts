@@ -17,7 +17,7 @@ function shouldRetry(failureCount: number, error: unknown): boolean {
 const coldStartDelay = (attempt: number) => Math.min(1000 * 3 ** attempt, 6000)
 
 /**
- * Polls /health until the backend answers. Used by the landing page to show a
+ * Polls /api/health until the backend answers. Used by the landing page to show a
  * "waking up" notice during a cold start rather than letting searches fail silently.
  */
 export function useServerHealth() {

@@ -130,12 +130,12 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
 }
 
 /**
- * GET /health - liveness probe used to detect a cold start before the
+ * GET /api/health - liveness probe used to detect a cold start before the
  * user commits a search. Returns true once the backend answers - throws (like any
  * request) while it is still spinning up, so callers can retry.
  */
 export async function pingHealth(): Promise<boolean> {
-  await request<unknown>('/health')
+  await request<unknown>('/api/health')
   return true
 }
 
