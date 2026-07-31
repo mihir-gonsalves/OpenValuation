@@ -17,10 +17,16 @@ trading days even across the Christmas to New Year closure.
 
 **Transient failures are retried.** Every multiple is price-dependent, so an
 empty price map blanks the entire table rather than degrading part of it. A
-slow or rate-limited response is therefore retried with backoff instead
-of being turned into N/A on the first miss. A response that simply carries no
-rows is not retried - that means the ticker has no data in the window, which
-another attempt cannot change.
+failed fetch is therefore retried with backoff instead of being turned into N/A
+on the first miss.
+
+**An empty frame counts as a failure.** yf.download catches every internal
+error and substitutes an empty frame, so it never raises. That makes an empty
+frame indistinguishable from a real failure, and it must be retried rather than
+read as "this ticker has no data": in practice the first fetch in a fresh
+process routinely comes back empty while yfinance completes its cookie
+handshake, and the next one succeeds. The cost is one wasted retry on a ticker
+that genuinely has no data in the window.
 
 yfinance is synchronous, so every call goes through asyncio.to_thread.
 """
@@ -101,8 +107,11 @@ async def get_prices(ticker: str, filing_dates: list[date]) -> dict[date, Decima
     downloads, which is what keeps yfinance from rate-limiting the request.
     Per-date semantics are unchanged.
 
-    A timeout or a PriceFetchError is retried up to PRICE_FETCH_ATTEMPTS times.
-    Only an exhausted retry budget, or a response with no usable prices, returns all-None.
+    Anything short of usable rows is retried up to PRICE_FETCH_ATTEMPTS times,
+    including an empty frame. yf.download never raises: it catches every error
+    internally and substitutes an empty frame, so an empty frame is the *normal*
+    shape of a failure and cannot be read as "this ticker has no data".
+    Only an exhausted retry budget returns all-None.
     """
     if not filing_dates:
         return {}
@@ -110,34 +119,34 @@ async def get_prices(ticker: str, filing_dates: list[date]) -> dict[date, Decima
     window_start = min(filing_dates) + timedelta(days=1)
     window_end = max(filing_dates) + timedelta(days=PRICE_WINDOW_DAYS)
 
-    df = None
     for attempt in range(1, PRICE_FETCH_ATTEMPTS + 1):
         try:
             df = await asyncio.wait_for(
                 asyncio.to_thread(_download_window_sync, normalized, window_start, window_end),
                 timeout=PRICE_FETCH_TIMEOUT_SECONDS,
             )
-            # A None df here means yfinance answered with nothing, so stop.
-            break
         except (asyncio.TimeoutError, PriceFetchError) as exc:
-            # Logged at each attempt because the cause differs per attempt, and a
-            # single collapsed message cannot tell a timeout from a rate limit.
-            if attempt == PRICE_FETCH_ATTEMPTS:
-                logger.warning(
-                    "Batch price fetch for %s failed on final attempt %d/%d: %r.",
-                    normalized, attempt, PRICE_FETCH_ATTEMPTS, exc,
-                )
-                return {d: None for d in filing_dates}
-            logger.info(
-                "Batch price fetch for %s failed on attempt %d/%d (%r), retrying in %.0fs.",
-                normalized, attempt, PRICE_FETCH_ATTEMPTS, exc, PRICE_RETRY_BACKOFF_SECONDS,
-            )
-            await asyncio.sleep(PRICE_RETRY_BACKOFF_SECONDS)
+            reason = repr(exc)
+        else:
+            if df is not None:
+                return {d: _first_close_after(df, d) for d in filing_dates}
+            reason = "empty result"
 
-    if df is None:
-        logger.warning("No price data for %s in [%s, %s).", normalized, window_start, window_end)
-        return {d: None for d in filing_dates}
-    return {d: _first_close_after(df, d) for d in filing_dates}
+        # Logged per attempt: a single collapsed message cannot tell a timeout
+        # from a rejection, and yfinance only ever logs the real cause itself.
+        if attempt == PRICE_FETCH_ATTEMPTS:
+            logger.warning(
+                "Batch price fetch for %s failed on final attempt %d/%d: %s.",
+                normalized, attempt, PRICE_FETCH_ATTEMPTS, reason,
+            )
+            break
+        logger.info(
+            "Batch price fetch for %s failed on attempt %d/%d (%s), retrying in %.0fs.",
+            normalized, attempt, PRICE_FETCH_ATTEMPTS, reason, PRICE_RETRY_BACKOFF_SECONDS,
+        )
+        await asyncio.sleep(PRICE_RETRY_BACKOFF_SECONDS)
+
+    return {d: None for d in filing_dates}
 
 
 # ---------------------------------------------------------------------------

@@ -1,7 +1,7 @@
 # OpenValuation: Project Status
 
-**Last Updated:** 2026-06-14  
-**Current Phase:** Phase 5 - Deployment.
+**Last Updated:** 2026-07-30  
+**Current Phase:** Phase 6 - QA and Finalization.
 
 ## Overview
 
@@ -291,7 +291,7 @@ Status: Complete
 
 ### Phase 6: QA and Finalization
 
-Status: Not started
+Status: In Progress
 
 Manual testing across multiple company types.
 

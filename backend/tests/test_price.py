@@ -13,8 +13,8 @@ Coverage:
   - Fetch timeout -> None returned
   - get_prices batch: single download, one result per filing date
   - get_prices batch: transient failure -> retried, succeeds on a later attempt
+  - get_prices batch: empty frame -> retried (yf.download never raises)
   - get_prices batch: exhausted retries -> all-None dict
-  - get_prices batch: empty response -> all-None dict without retrying
   - get_prices batch: empty list -> empty dict
 """
 
@@ -251,15 +251,38 @@ async def test_get_prices_empty_list_returns_empty_dict():
 
 
 @pytest.mark.asyncio
-async def test_get_prices_empty_response_returns_all_none_without_retrying():
-    """An empty response is Yahoo answering 'no data', which a retry cannot change."""
+async def test_get_prices_retries_empty_response():
+    """
+    yf.download swallows its errors and returns an empty frame, so an empty
+    result is the normal shape of a failure and must be retried.
+    """
     filing_dates = [date(2024, 1, 1), date(2024, 4, 1)]
 
-    with patch("app.services.price._download_window_sync", return_value=None) as mock_dl:
+    with patch("app.services.price._download_window_sync", return_value=None) as mock_dl, \
+         patch("app.services.price.PRICE_RETRY_BACKOFF_SECONDS", 0.0):
         result = await get_prices("AAPL", filing_dates)
 
     assert result == {date(2024, 1, 1): None, date(2024, 4, 1): None}
-    assert mock_dl.call_count == 1
+    assert mock_dl.call_count == 2
+
+
+@pytest.mark.asyncio
+async def test_get_prices_empty_then_populated_succeeds():
+    """The production case: the first fetch in a fresh process comes back empty."""
+    filing_dates = [date(2024, 1, 1)]
+    good_df = pd.DataFrame({"Close": [150.0]}, index=[pd.Timestamp("2024-01-02")])
+    calls = []
+
+    def _empty_then_good(ticker, start, end):
+        calls.append(ticker)
+        return None if len(calls) == 1 else good_df
+
+    with patch("app.services.price._download_window_sync", side_effect=_empty_then_good), \
+         patch("app.services.price.PRICE_RETRY_BACKOFF_SECONDS", 0.0):
+        result = await get_prices("AAPL", filing_dates)
+
+    assert len(calls) == 2
+    assert result[date(2024, 1, 1)] == Decimal("150.0000")
 
 
 @pytest.mark.asyncio
